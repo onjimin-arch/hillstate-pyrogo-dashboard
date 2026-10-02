@@ -1,0 +1,26 @@
+# 푸시·PR 마다 테스트를 돌린다. 두 명이 같이 수정하므로 사람 기억에 의존하지 않는다.
+# Python 은 .python-version(3.11) 에 맞춘다 — 배포 이미지와 같은 버전에서 검증한다.
+name: test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 테스트
+        # SQLite 인메모리를 쓰므로 DB·Redash 설정 없이 돌아간다.
+        run: python -m pytest tests -q

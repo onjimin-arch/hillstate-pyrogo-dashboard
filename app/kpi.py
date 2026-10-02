@@ -153,6 +153,8 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     rows = keep(rows, notes)
     robots_all = [o for o in rows if o.delivery_type == ROBOT]
     general = [o for o in rows if o.delivery_type != ROBOT]
+    loadshop_general = [o for o in general if o.store_type == "일반(로드샵)"]
+    b2b_general = [o for o in general if o.store_type == "B2B"]
     robots = [o for o in robots_all if not _time_invalid(o, notes)]   # 시간·적시 지표 모수
     timed = general + robots
 
@@ -194,6 +196,8 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "completed": len(rows),
         "robot_done": len(robots_all),
         "general_done": len(general),
+        "loadshop_done": len(loadshop_general),
+        "b2b_done": len(b2b_general),
         "usage_pct": round(len(robots_all) / len(rows) * 100, 1) if rows else None,
         "avg_total_min": _min(avg_total),
         "median_total_min": _min(statistics.median(clean)) if clean else None,
