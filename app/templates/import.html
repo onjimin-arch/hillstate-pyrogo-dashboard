@@ -5,6 +5,14 @@
   이미 있는 id 는 건너뛰고, 끝나면 id 시퀀스를 최댓값으로 맞춥니다. 같은 파일을 다시 올려도 안전합니다. 최대 {{ max_mb }}MB.
 </p>
 <div class="card" style="margin-bottom:12px">
+  <div class="k"><b>Redash 수집 상태</b><span id="c-state" class="badge"></span>
+    <button type="button" id="c-go" class="imp-btn">지금 수집</button></div>
+  <div class="sub" id="c-info"></div>
+  <div id="c-err" class="badge err" hidden></div>
+  <table class="imp-tbl"><thead><tr><th>시각</th><th>결과</th><th>건수</th><th>메시지</th></tr></thead>
+    <tbody id="c-rows"></tbody></table>
+</div>
+<div class="card" style="margin-bottom:12px">
   <form id="f" class="imp-form">
     <input type="file" id="file" accept=".db,.sqlite,.sqlite3" required>
     <button type="submit" id="go">가져오기 시작</button>
@@ -29,6 +37,8 @@
   .imp-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .imp-form button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 20px; font: inherit; cursor: pointer; }
   .imp-form button:disabled { opacity: .5; cursor: default; }
+  .imp-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px; font: inherit; cursor: pointer; }
+  .imp-tbl td.l { text-align: left; word-break: break-all; }
   .imp-bar { width: 100%; height: 14px; margin: 10px 0; }
   .imp-tbl { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
   .imp-tbl th, .imp-tbl td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); }
@@ -87,6 +97,32 @@
     xhr.onerror = function () { setMsg('업로드 실패(네트워크)'); $('go').disabled = false; };
     xhr.send(file);        // File 을 그대로 본문으로 — 브라우저가 파일을 스트리밍해 보낸다
   });
+  function cRender(j) {
+    var b = $('c-state');
+    b.textContent = j.running ? '수집 중' : (j.enabled ? '자동 수집 켜짐' : '자동 수집 꺼짐');
+    b.className = 'badge' + (j.running ? ' warn' : (j.enabled ? '' : ' err'));
+    var miss = Object.keys(j.env).filter(function (k) { return !j.env[k]; });
+    $('c-info').textContent = 'DB raw_orders ' + fmt(j.raw_orders) + '건 · 주기 ' + (j.interval_min || '-') + '분 · 마지막 시작 ' + (j.last_start || '-') +
+      (miss.length ? ' · 미설정 환경변수: ' + miss.join(', ') : '');
+    var e = $('c-err'); e.hidden = !j.last_error; e.textContent = j.last_error || '';
+    var rows = $('c-rows'); rows.textContent = '';
+    j.log.forEach(function (r) {
+      var tr = document.createElement('tr');
+      [r.ts, r.status, fmt(r.rows), r.message].forEach(function (v, i) {
+        var td = document.createElement('td'); td.textContent = v; if (i === 3) td.className = 'l'; tr.appendChild(td);
+      });
+      rows.appendChild(tr);
+    });
+  }
+  function cPoll() {
+    fetch('/admin/collect/status', {cache: 'no-store'}).then(function (r) { return r.json(); }).then(cRender).catch(function () {});
+  }
+  $('c-go').addEventListener('click', function () {
+    fetch('/admin/collect', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { setMsg('수집 시작 실패: ' + (d.detail || r.status)); });
+    }).then(cPoll);
+  });
+  cPoll(); setInterval(cPoll, 5000);
   poll();                  // 페이지를 다시 열어도 진행 중인 작업을 이어서 보여준다
 })();
 </script>

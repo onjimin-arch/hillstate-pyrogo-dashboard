@@ -21,7 +21,9 @@ from starlette.concurrency import run_in_threadpool
 
 from . import ai, importer, kpi, scheduler
 from .config import CFG, ROOT
-from .db import RawOrder, RobotOrderNote, get_session_factory
+from sqlalchemy import func, select
+
+from .db import CollectLog, RawOrder, RobotOrderNote, get_session_factory
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")     # 로컬 개발용. 배포 환경에서는 플랫폼이 환경변수를 주입한다.
@@ -229,6 +231,25 @@ def import_page(request: Request, db=Depends(get_db), _=Depends(require_import_a
 @app.get("/admin/import/status")
 def import_status(_=Depends(require_import_admin)):
     return JSONResponse(importer.snapshot() or {"status": "idle"}, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/admin/collect/status")
+def collect_status(db=Depends(get_db), _=Depends(require_import_admin)):
+    logs = db.scalars(select(CollectLog).order_by(CollectLog.ts.desc()).limit(10)).all()
+    n_orders = db.scalar(select(func.count()).select_from(RawOrder))
+    return JSONResponse({**scheduler.status(), "raw_orders": n_orders, "log": [
+        {"ts": r.ts.strftime("%m-%d %H:%M:%S"), "status": r.status, "rows": r.rows,
+         "message": (r.message or "")[:300]} for r in logs]}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/admin/collect", status_code=202)
+def collect_now(request: Request, user=Depends(require_import_admin)):
+    if "x-requested-with" not in request.headers:     # 커스텀 헤더 필수(CSRF 방지)
+        raise HTTPException(400, "잘못된 요청")
+    if not scheduler.trigger():
+        raise HTTPException(409, "이미 수집이 진행 중입니다")
+    log.info("manual collect by=%s", user)
+    return {"status": "running"}
 
 
 @app.post("/admin/import/upload", status_code=202)
