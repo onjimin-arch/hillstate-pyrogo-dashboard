@@ -8,7 +8,8 @@
 {% endif %}
 
 {% set day_split = p.grain == 'day' and dd and m.completed %}
-{% if day_split %}<div class="split"><div class="col">{% endif %}
+{% set week_split = p.grain == 'week' %}
+{% if day_split or week_split %}<div class="split"><div class="col">{% endif %}
 <div class="group-title">완료 건수 · 로봇 이용</div>
 <div class="cards">
   <div class="card">
@@ -68,11 +69,10 @@
     {% if m.fail_n %}<div class="sub">실패로 기록된 건 {{ m.fail_n }}건</div>{% endif %}
   </div>
 </div>
-{% set week_split = p.grain == 'week' %}
-{% if day_split %}</div>{% endif %}
+{% if day_split or week_split %}</div>{% endif %}
 {% if p.grain != 'day' %}
+{% if week_split %}<div class="col">{% endif %}
 <div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
-{% if week_split %}<div class="split">{% endif %}
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
@@ -94,12 +94,12 @@
 </table>
 </div>
 {% if week_split %}
-<div class="chart-card">
+<div class="chart-card" style="margin-top:14px">
   <h3>일별 완료 건수</h3>
   <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }}</p>
   <canvas id="dailyChart"></canvas>
 </div>
-</div>
+</div></div>
 {% endif %}
 {% endif %}
 
