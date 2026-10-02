@@ -31,12 +31,13 @@
       <a href="/robots" class="{{ 'on' if active == 'robots' }}">로봇 배송 건</a>
       <a href="/orders" class="{{ 'on' if active == 'orders' }}">전체 주문</a>
       <a href="/ask" class="{{ 'on' if active == 'ask' }}">AI 질문</a>
+      {% if can_import %}<a href="/admin/import" class="{{ 'on' if active == 'import' }}">데이터 가져오기</a>{% endif %}
     </nav>
     <button class="theme" type="button" onclick="toggleTheme()" aria-label="테마 전환">◐</button>
   </header>
 
   {% block controls %}
-  {% if active != 'ask' %}
+  {% if active not in ('ask', 'import') %}
   {% set base = base_path or ('/' if active == 'dashboard' else '/robots') %}
   {% set xq = extra_qs or '' %}
   <div class="controls">
