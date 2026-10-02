@@ -32,7 +32,7 @@ class AIError(Exception):
 # ------------------------------------------------------------------ 뷰
 def ensure_views(session) -> None:
     b = CFG["building"].replace("'", "''")
-    st = CFG["store_type"].replace("'", "''")
+    st = ", ".join("'" + t.replace("'", "''") + "'" for t in CFG["store_types"])
     conn = session.connection()
     from sqlalchemy import text
     if conn.dialect.name == "postgresql":
@@ -53,10 +53,10 @@ def ensure_views(session) -> None:
           s_dockclose_robotfinish, s_order_finish,
           n.result_type AS result_type, n.miss_reason AS miss_reason, n.note AS note,
           CAST(COALESCE(n.exclude_from_kpi, FALSE) AS INTEGER) AS exclude_from_kpi,
-          CASE WHEN building = '{b}' AND store_type = '{st}' AND delivery_status = 'DROP_FINISHED'
+          CASE WHEN building = '{b}' AND store_type IN ({st}) AND delivery_status = 'DROP_FINISHED'
                     AND NOT COALESCE(n.exclude_from_kpi, FALSE)
                THEN 1 ELSE 0 END AS in_kpi_scope,
-          CASE WHEN building = '{b}' AND store_type = '{st}' AND delivery_status = 'DROP_FINISHED'
+          CASE WHEN building = '{b}' AND store_type IN ({st}) AND delivery_status = 'DROP_FINISHED'
                     AND NOT COALESCE(n.exclude_from_kpi, FALSE) AND COALESCE(n.result_type, '') <> '완료(오류)'
                THEN 1 ELSE 0 END AS in_time_scope
         FROM raw_orders o LEFT JOIN robot_order_notes n ON n.delivery_id = o.delivery_id"""))
@@ -204,10 +204,10 @@ DB에 수집된 주문 데이터의 범위는 접수일 기준 {cover}이다.
 - 질문 기간이 수집 범위({cover}) 밖이거나 일부만 걸치면 "0건"이라고 답하지 말고 "수집된 데이터 없음(수집 범위 외)"이라고 밝히고, 범위 안의 값만 답한다. 월별 등 기간별 집계는 query_sql로 ord_date 기준 GROUP BY 하여 실제 존재하는 기간을 확인한 뒤 답한다.
 - 숫자는 반드시 도구(get_kpi, query_sql)로 조회한 값만 쓴다. 추측·기억으로 만들지 않는다. 데이터가 없으면 없다고 말한다.
 - KPI(완료 건수, 평균 시간, 적시 배송률, 성공률, 이용률)는 get_kpi를 우선 쓴다(대시보드와 같은 값, 집계 제외 반영). 그 외 자유 질문(특이사항 정리, 시간대, 상점·주문처·기체별 등)은 query_sql을 쓴다.
-- 기본 모수는 상점구분='{CFG['store_type']}' + 완료(DROP_FINISHED). B2B를 묻지 않았다면 B2B는 섞지 않는다. 다른 모수를 쓰면 답에 밝힌다.
+- 기본 모수는 상점구분 {', '.join(CFG['store_types'])} + 완료(DROP_FINISHED). 상점구분별로 나눠 묻는 경우 store_type 으로 구분한다. 다른 모수를 쓰면 답에 밝힌다.
 - 비율·평균에는 건수(n)를 함께 적는다. 일 단위처럼 표본이 작으면(n<10) 해석에 주의하라고 덧붙인다.
 - 집계 제외(exclude_from_kpi=1)로 체크된 건은 모든 KPI 수치에서 이미 빠져 있다. 제외 건이 있으면 몇 건이고 사유(특이사항)가 무엇인지 함께 언급한다.
-- 로봇으로 처리했어야 했는데 놓친 주문은 delivery_type='일반'인 로드샵 완료 건 중 miss_reason 이 기록된 건이다. '누락', '테스트 주문', '매칭 실패' 질문은 miss_reason·note 로 집계한다.
+- 로봇으로 처리했어야 했는데 놓친 주문은 delivery_type='일반'인 모수 내 완료 건 중 miss_reason 이 기록된 건이다. '누락', '테스트 주문', '매칭 실패' 질문은 miss_reason·note 로 집계한다.
 - 사용자가 입력한 특이사항(비고)·결과 구분(정상/실패/기타)·집계 제외는 ai_orders 의 note, result_type, exclude_from_kpi 컬럼(또는 get_kpi 의 noted_robot_orders)에 있다. '특이사항', '비고', '실패 사유', '제외된 건' 질문은 반드시 이 값을 조회해 근거로 쓴다.
 - 결과 구분: '완료(오류)'는 로봇이 실제로는 정상 배송했지만 시스템 이벤트 오류로 시간 데이터가 비정상인 건이다. 건수·이용률·성공률에는 포함하고 평균 시간·적시 배송률·구간 평균에서만 제외한다(SQL로 시간 평균을 낼 땐 in_time_scope=1 조건 사용). '실패'는 성공률 분모에 포함·분자 제외, '기타'는 성공률 분모에서 제외.
 - 시간은 DB에 초 단위다. 답은 분 단위(소수 1자리)로 환산한다.
@@ -215,7 +215,7 @@ DB에 수집된 주문 데이터의 범위는 접수일 기준 {cover}이다.
 - 한국어로 간결하게 답한다. 핵심 결론을 먼저, 근거 수치를 뒤에 쓴다. 마크다운 표는 쓰지 말고 짧은 목록을 쓴다.
 
 ## 지표 정의
-- 완료 건수: 모수 중 delivery_status='DROP_FINISHED'. 로봇 완료 건수: delivery_type='로봇연계'. 로봇 이용률 = 로봇연계 ÷ 로드샵 전체 완료.
+- 완료 건수: 모수 중 delivery_status='DROP_FINISHED'. 로봇 완료 건수: delivery_type='로봇연계'. 로봇 이용률 = 로봇연계 ÷ 전체 완료(로드샵+B2B).
 - 접수→완료 = s_order_finish, 픽업→완료 = s_order_finish - s_order_pickup.
 - 로봇 적시 배송률 = s_dockclose_robotfinish <= {CFG['timely_threshold_sec']}초(7분) 건수 ÷ 로봇연계 건수 (목표 {CFG['targets']['timely_pct']}%).
 - 8월 baseline: 완료 {CFG['baseline']['orders']}건, 접수→완료 {CFG['baseline']['total_min']}분, 픽업→완료 {CFG['baseline']['pickup_min']}분. PoC 기간: {CFG['poc']['start']} ~ {CFG['poc']['end']}.
@@ -227,7 +227,7 @@ ai_orders(주문 1건 1행): delivery_id, order_id, robot_delivery_id, ord_date(
   dispatch_count, order_status, delivery_status, dispatch_dt, pickup_dt, dock_close_dt, robot_finish_dt, finish_dt,
   s_order_dispatch, s_dispatch_pickup, s_order_pickup, s_pickup_dockclose, s_dockclose_robotfinish, s_order_finish (모두 초),
   miss_reason(일반 주문의 로봇 누락 사유: '시스템 오류(로봇 매칭 실패)'|'테스트 주문'|'로봇 운영 외(점검·미운영)'|'상점 미동의'|'기타'|NULL), result_type(로봇연계 건의 결과 구분: NULL 또는 '정상'=정상(완료) | '완료(오류)' | '실패' | '기타'), note(특이사항), exclude_from_kpi(1=집계 제외; 사용자 입력, 로봇연계 건만 값 존재),
-  in_kpi_scope (1=건수·이용률·성공률 모수: 이 단지+로드샵+완료+집계 제외 아님),
+  in_kpi_scope (1=건수·이용률·성공률 모수: 이 단지+로드샵·B2B+완료+집계 제외 아님),
   in_time_scope (1=평균 시간·적시 배송률 모수: in_kpi_scope 이면서 result_type이 '완료(오류)'가 아님)
 ai_robot_notes(사용자 입력 원본): delivery_id, result_type, note, exclude_from_kpi, updated_at, updated_by
 - 두 뷰는 delivery_id로 조인한다. 결과는 최대 {MAX_ROWS}행이므로 집계(GROUP BY)를 활용한다.

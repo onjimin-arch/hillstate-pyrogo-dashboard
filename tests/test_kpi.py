@@ -16,7 +16,7 @@ def make_order(i, robot=False, store_type=None, hand=None, total=1200, day=30, h
     return dbm.RawOrder(
         delivery_id=str(i), order_id=str(i), building=CFG["building"],
         delivery_type="로봇연계" if robot else "일반",
-        store_type=store_type or CFG["store_type"], delivery_status=status,
+        store_type=store_type or CFG["store_types"][0], delivery_status=status,
         ord_dt=datetime(2026, 9, day, hour, 0), s_order_finish=total, s_order_pickup=total / 2,
         s_order_dispatch=30, s_dispatch_pickup=300, s_pickup_dockclose=300 if robot else None,
         s_dockclose_robotfinish=hand, robot_name="1호기" if robot else None)
@@ -33,7 +33,7 @@ def session(monkeypatch):
             make_order(3, robot=True, hand=300, total=1500),  # 로봇 적시
             make_order(4, robot=True, hand=500, total=2100),  # 로봇 지연
             make_order(5, robot=True, hand=900, total=5000),  # 로봇 이상치(제외 대상)
-            make_order(6, store_type="B2B"),                  # 모수 아님
+            make_order(6, store_type="B2B"),                  # B2B도 모수 포함
             make_order(7, status="CANCELED"),                 # 완료 아님
         ])
         s.commit()
@@ -53,14 +53,14 @@ def test_period_day_defaults_to_yesterday():
 
 def test_scope_only_loadshop_and_completed(session):
     rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
-    assert {o.delivery_id for o in rows} == {"1", "2", "3", "4", "5"}
+    assert {o.delivery_id for o in rows} == {"1", "2", "3", "4", "5", "6"}
 
 
 def test_metrics_without_notes(session):
     rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
     m = kpi.compute_metrics(rows, {})
-    assert m["completed"] == 5 and m["robot_done"] == 3
-    assert m["usage_pct"] == 60.0
+    assert m["completed"] == 6 and m["robot_done"] == 3
+    assert m["usage_pct"] == 50.0
     assert m["timely_n"] == 1 and m["timely_base"] == 3     # 300초만 7분 이내
     assert m["success_pct"] == 100.0
 
@@ -70,11 +70,11 @@ def test_exclusion_removes_from_all_metrics(session):
     session.commit()
     rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
     m = kpi.compute_metrics(rows, kpi.load_notes(session))
-    assert m["completed"] == 4 and m["robot_done"] == 2 and m["usage_pct"] == 50.0   # 건수·이용률에서도 제외
+    assert m["completed"] == 5 and m["robot_done"] == 2 and m["usage_pct"] == 40.0   # 건수·이용률에서도 제외
     assert m["timely_base"] == 2 and m["excluded_n"] == 1
     assert m["avg_total_robot_min"] == round((1500 + 2100) / 2 / 60, 1)
     d = kpi.dashboard(session, kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1)))
-    assert sum(d["daily"]["robot"]) + sum(d["daily"]["general"]) == 4                  # 차트에도 반영
+    assert sum(d["daily"]["robot"]) + sum(d["daily"]["general"]) == 5                  # 차트에도 반영
 
 
 def test_failure_counts_against_success(session):
@@ -132,11 +132,11 @@ def test_completed_with_error_counts_as_success_but_not_in_time(session):
     session.commit()
     rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
     m = kpi.compute_metrics(rows, kpi.load_notes(session))
-    assert m["completed"] == 5 and m["robot_done"] == 3 and m["usage_pct"] == 60.0     # 건수·이용률 포함
+    assert m["completed"] == 6 and m["robot_done"] == 3 and m["usage_pct"] == 50.0     # 건수·이용률 포함
     assert (m["success_n"], m["success_base"]) == (3, 3)                              # 성공에 포함
     assert m["timely_base"] == 2 and m["time_excluded_n"] == 1                        # 적시 모수에서 제외
     assert m["avg_total_robot_min"] == round((1500 + 2100) / 2 / 60, 1)               # 시간 평균에서 제외
-    assert m["time_n"] == 4 and m["err_n"] == 1 and m["excluded_n"] == 0
+    assert m["time_n"] == 5 and m["err_n"] == 1 and m["excluded_n"] == 0
     w = kpi.weekly_series(rows, kpi.load_notes(session), date(2026, 9, 30))
     assert w["robot_min"][-1] == round((1500 + 2100) / 2 / 60, 1)
 
@@ -145,8 +145,8 @@ def test_order_list_filters_and_miss_candidates(session):
     p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
     r = kpi.order_list(session, p)
     assert r["total"] == 7 and r["counts"]["robot"] == 3                    # B2B·취소 포함 전체
-    assert r["counts"]["miss"] == 2                                          # 로봇 안 탄 로드샵 완료(1,2)
-    assert kpi.order_list(session, p, "miss")["total"] == 2
+    assert r["counts"]["miss"] == 3                                          # 로봇 안 탄 로드샵 완료(1,2)
+    assert kpi.order_list(session, p, "miss")["total"] == 3
     assert kpi.order_list(session, p, st="b2b")["total"] == 1
     assert kpi.order_list(session, p, q="3")["total"] >= 1
 
@@ -166,7 +166,7 @@ def test_order_note_endpoint_test_order_excluded_from_kpi(session):
     assert session.get(dbm.RobotOrderNote, "4").result_type == "실패"
     rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
     m = kpi.compute_metrics(rows, kpi.load_notes(session))
-    assert m["completed"] == 4 and m["miss_n"] == 1 and m["excluded_n"] == 1
+    assert m["completed"] == 5 and m["miss_n"] == 1 and m["excluded_n"] == 1
     assert c.get("/orders?grain=day&d=2026-09-30&flt=miss").status_code == 200
 
 

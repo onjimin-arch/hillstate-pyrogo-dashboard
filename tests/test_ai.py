@@ -21,7 +21,7 @@ def s(session):  # noqa: F811
 
 def test_select_allowed(s):
     r = ai.run_sql(s, "SELECT delivery_type, COUNT(*) n FROM ai_orders WHERE in_kpi_scope=1 GROUP BY 1 ORDER BY 1")
-    assert r["rows"] == [["로봇연계", 3], ["일반", 2]]
+    assert r["rows"] == [["로봇연계", 3], ["일반", 3]]
 
 
 @pytest.mark.parametrize("sql", [
@@ -52,7 +52,7 @@ def test_notes_view_readable(s):
 
 def test_get_kpi_matches_dashboard(s):
     r = ai.tool_get_kpi(s, "day", "2026-09-30")
-    assert r["metrics"]["completed"] == 5 and r["metrics"]["timely_base"] == 3
+    assert r["metrics"]["completed"] == 6 and r["metrics"]["timely_base"] == 3
     assert r["period"]["data_through"] == "2026-09-30"
 
 
@@ -88,9 +88,9 @@ def test_ai_sees_notes_and_exclusion(s):
     s.commit()
     r = ai.run_sql(s, "SELECT delivery_id, note, exclude_from_kpi, in_kpi_scope FROM ai_orders WHERE note IS NOT NULL")
     assert r["rows"] == [["5", "라이더 직접 배송", 1, 0]]
-    assert ai.run_sql(s, "SELECT SUM(in_kpi_scope) FROM ai_orders")["rows"][0][0] == 4
+    assert ai.run_sql(s, "SELECT SUM(in_kpi_scope) FROM ai_orders")["rows"][0][0] == 5
     k = ai.tool_get_kpi(s, "day", "2026-09-30")
-    assert k["metrics"]["completed"] == 4 and k["metrics"]["excluded_n"] == 1
+    assert k["metrics"]["completed"] == 5 and k["metrics"]["excluded_n"] == 1
     assert k["noted_robot_orders"][0]["note"] == "라이더 직접 배송" and k["noted_robot_orders"][0]["excluded"]
 
 
@@ -98,4 +98,4 @@ def test_ai_time_scope_excludes_error_completion(s):
     s.add(dbm.RobotOrderNote(delivery_id="5", result_type="완료(오류)"))
     s.commit()
     r = ai.run_sql(s, "SELECT SUM(in_kpi_scope), SUM(in_time_scope) FROM ai_orders")
-    assert r["rows"][0] == [5, 4]
+    assert r["rows"][0] == [6, 5]

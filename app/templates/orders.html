@@ -3,7 +3,7 @@
 {% set qs = 'grain=' ~ p.grain ~ ('&d=' ~ p.start if p.grain != 'custom' else '&start=' ~ p.start ~ '&end=' ~ p.end) %}
 <p class="help">
   이 단지의 <b>모든 주문</b>(로드샵·B2B, 완료·취소 포함)을 모아 봅니다. 로봇으로 처리했어야 했는데 놓친 주문을 찾고 사유를 남기는 용도입니다.
-  <b>로봇 누락 후보</b> = 로봇을 타지 않은 로드샵 완료 건입니다.
+  <b>로봇 누락 후보</b> = 로봇을 타지 않은 완료 건(로드샵·B2B)입니다.
   사유 구분(시스템 오류·테스트 주문 등)과 특이사항은 입력칸을 벗어날 때 저장됩니다.
   <b>테스트 주문</b> 등 실적이 아닌 건은 <b>집계 제외</b>를 체크하세요(완료 건수·평균 시간 등 모든 집계에서 빠집니다).
   <label style="margin-left:8px">입력자 <input type="text" id="editor" placeholder="이름" size="8"></label>

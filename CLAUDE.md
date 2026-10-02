@@ -4,7 +4,7 @@
 
 ## 구조
 - `app/collector.py` Redash API 수집 → `raw_orders` upsert (최근 7일 롤링). 수집 배치만 raw_orders에 쓴다.
-- `app/kpi.py` 기간 해석(D-1, 주=월~일) + 지표 집계. 모수=`config.yaml`의 단지+상점구분(로드샵)+DROP_FINISHED.
+- `app/kpi.py` 기간 해석(D-1, 주=월~일) + 지표 집계. 모수=`config.yaml`의 단지+상점구분(`store_types`: 로드샵·B2B)+DROP_FINISHED.
 - `app/main.py` FastAPI. `/` 대시보드, `/robots` 로봇 건 리스트(결과 구분·특이사항·집계 제외 입력).
 - `robot_order_notes`는 웹앱만 쓴다. 수집이 덮어쓰지 않는다.
 - 집계 제외: 로봇 품질(적시·성공률)·로봇 평균 시간에서만 제외, 건수·이용률은 유지.

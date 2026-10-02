@@ -80,12 +80,12 @@ def _bounds(s: date, e: date):
 
 
 def scoped_done(session, s: date, e: date) -> list[RawOrder]:
-    """집계 모수: 단지 + 상점구분(로드샵) + 완료."""
+    """집계 모수: 단지 + 상점구분(로드샵·B2B) + 완료."""
     if e < s:
         return []
     lo, hi = _bounds(s, e)
     q = select(RawOrder).where(
-        RawOrder.building == CFG["building"], RawOrder.store_type == CFG["store_type"],
+        RawOrder.building == CFG["building"], RawOrder.store_type.in_(CFG["store_types"]),
         RawOrder.delivery_status == DONE, RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
     return list(session.scalars(q))
 
@@ -396,7 +396,7 @@ def row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "late": (hand is not None and hand > thr),
         "dispatch_count": o.dispatch_count,
         "delivery_status": o.delivery_status,
-        "in_scope": o.store_type == CFG["store_type"],
+        "in_scope": o.store_type in CFG["store_types"],
         "result_type": (n.result_type if n and n.result_type else ""),
         "note": (n.note if n and n.note else ""),
         "exclude": bool(n and n.exclude_from_kpi),
@@ -418,7 +418,7 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "robot_name": o.robot_name, "order_source": o.order_source, "store_name": o.store_name,
         "store_type": o.store_type, "delivery_status": o.delivery_status,
         "total_min": _min(o.s_order_finish), "dispatch_count": o.dispatch_count,
-        "in_scope": o.store_type == CFG["store_type"],
+        "in_scope": o.store_type in CFG["store_types"],
         "miss_reason": (n.miss_reason if n and n.miss_reason else ""),
         "note": (n.note if n and n.note else ""),
         "exclude": bool(n and n.exclude_from_kpi),
@@ -437,15 +437,15 @@ def order_list(session, p: Period, flt: str | None = None, st: str | None = None
     notes = load_notes(session)
     rows = [order_row_view(o, notes.get(o.delivery_id)) for o in session.scalars(stmt)]
     if st == "loadshop":
-        rows = [r for r in rows if r["in_scope"]]
+        rows = [r for r in rows if r["store_type"] == "일반(로드샵)"]
     elif st == "b2b":
-        rows = [r for r in rows if not r["in_scope"]]
+        rows = [r for r in rows if r["store_type"] == "B2B"]
     if q:
         k = q.strip().lower()
         rows = [r for r in rows if any(k in str(r[f] or "").lower() for f in
                                        ("order_id", "delivery_id", "store_name", "order_source", "robot_name"))]
 
-    def is_miss(r):      # 로봇 안 탄 로드샵 완료 건 = 로봇 누락 후보
+    def is_miss(r):      # 로봇 안 탄 모수 내 완료 건 = 로봇 누락 후보
         return not r["is_robot"] and r["in_scope"] and r["delivery_status"] == DONE
 
     counts = {

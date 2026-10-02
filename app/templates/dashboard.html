@@ -13,14 +13,14 @@
 <div class="group-title">완료 건수 · 로봇 이용</div>
 <div class="cards">
   <div class="card">
-    <div class="k">로드샵 완료 건수</div>
+    <div class="k">전체 완료 건수</div>
     <div class="v">{{ m.completed }}<small>건</small></div>
     <div class="sub">일반 {{ m.general_done }} · 로봇연계 {{ m.robot_done }}</div>
   </div>
   <div class="card">
     <div class="k">로봇 완료 건수</div>
     <div class="v">{{ m.robot_done }}<small>건</small></div>
-    <div class="sub">로봇 이용률 {{ m.usage_pct | num(1, '%') }} (로봇연계 ÷ 로드샵 전체 완료)</div>
+    <div class="sub">로봇 이용률 {{ m.usage_pct | num(1, '%') }} (로봇연계 ÷ 전체 완료)</div>
   </div>
   <div class="card">
     <div class="k">특이사항 · 집계 제외 <a href="/robots?grain={{ p.grain }}&d={{ p.start }}{% if p.grain == 'custom' %}&start={{ p.start }}&end={{ p.end }}{% endif %}&flt=noted" style="margin-left:auto;font-size:12px">목록 보기 ›</a></div>
@@ -173,7 +173,7 @@
   </div>
   <div class="chart-card">
     <h3>로봇 이용률 (%)</h3>
-    <p class="d">주별 · 로봇연계 ÷ 로드샵 전체 완료</p>
+    <p class="d">주별 · 로봇연계 ÷ 전체 완료</p>
     <canvas id="usageChart"></canvas>
   </div>
   <div class="chart-card">
