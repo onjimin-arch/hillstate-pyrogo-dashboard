@@ -151,6 +151,7 @@
 {% if day_split %}</div></div>{% endif %}
 {% endif %}
 
+{% if p.grain != 'day' %}
 <div class="group-title">구간별 · 추이</div>
 <div class="charts">
   <div class="chart-card wide">
@@ -196,6 +197,7 @@
     {% else %}<div class="empty">데이터 없음</div>{% endif %}
   </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -215,11 +217,13 @@
   Chart.defaults.plugins.legend.labels.boxWidth = 10;
   Chart.defaults.plugins.legend.labels.boxHeight = 10;
   var baseOpt = { responsive: true, maintainAspectRatio: true, interaction: { mode: 'index', intersect: false } };
+  // 일 단위에서는 추이 차트 캔버스가 없다
+  var mk = function (id, cfg) { var el = document.getElementById(id); if (el) new Chart(el, cfg); };
 
   // 1) 구간 분해 스택바
   var segKeys = ['접수→배차', '배차→픽업완료', '픽업완료→적재함닫힘', '적재함닫힘→로봇배송완료', '픽업→완료'];
   var segCols = [v('--s3'), v('--s4'), v('--s5'), v('--s6'), v('--s7')];
-  new Chart(document.getElementById('segChart'), {
+  mk('segChart', {
     type: 'bar',
     data: { labels: ['로봇연계', '일반'],
       datasets: segKeys.map(function (k, i) {
@@ -232,7 +236,7 @@
   });
 
   // 2) 일별 완료 건수 (로봇연계 분리 스택)
-  new Chart(document.getElementById('dailyChart'), {
+  mk('dailyChart', {
     type: 'bar',
     data: { labels: D.daily.labels, datasets: [
       { label: '일반', data: D.daily.general, backgroundColor: general, borderColor: surface, borderWidth: 2, borderRadius: 3, stack: 'a' },
@@ -258,7 +262,7 @@
 
   // 3) 주별 평균 배송시간
   var baseLine = D.weekly.labels.map(function () { return D.baseline; });
-  new Chart(document.getElementById('weekChart'), {
+  mk('weekChart', {
     type: 'line',
     data: { labels: D.weekly.labels, datasets: [
       { label: '로봇연계', data: D.weekly.robot_min, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
@@ -268,7 +272,7 @@
   });
 
   // 4) 로봇 이용률 추이
-  new Chart(document.getElementById('usageChart'), {
+  mk('usageChart', {
     type: 'line',
     data: { labels: D.weekly.labels, datasets: [
       { label: '로봇 이용률(%)', data: D.weekly.usage_pct, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 } ] },
