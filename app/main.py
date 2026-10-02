@@ -125,7 +125,7 @@ async def lifespan(_app):
     scheduler.stop()
 
 
-app = FastAPI(title="로봇 연계 배송 KPI 대시보드", lifespan=lifespan, dependencies=[Depends(auth_gate)])
+app = FastAPI(title="로봇 배송 대시보드", lifespan=lifespan, dependencies=[Depends(auth_gate)])
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
@@ -327,7 +327,7 @@ async def import_upload(request: Request, user=Depends(require_import_admin)):
 async def access_denied(request: Request, exc: AccessDenied):
     if "text/html" in request.headers.get("accept", ""):
         html = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-                "<title>로봇 연계 배송 KPI 대시보드</title><body style='font:15px system-ui,sans-serif;"
+                "<title>로봇 배송 대시보드</title><body style='font:15px system-ui,sans-serif;"
                 "max-width:480px;margin:15vh auto;padding:0 20px'><h2>접근할 수 없습니다</h2>"
                 f"<p>{exc.msg}</p>" + (f"<p style='color:#666'>접속 계정: {html_escape(exc.email)}</p>" if exc.email else "")
                 + "</body>")
