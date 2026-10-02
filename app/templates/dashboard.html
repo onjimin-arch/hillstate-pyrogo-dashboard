@@ -7,6 +7,8 @@
     {% if p.eff_end < p.start %}<br>아직 전일(D-1) 기준으로 표시 가능한 날짜가 아닙니다.{% endif %}</div>
 {% endif %}
 
+{% set day_split = p.grain == 'day' and dd and m.completed %}
+{% if day_split %}<div class="split"><div class="col">{% endif %}
 <div class="group-title">완료 건수 · 로봇 이용</div>
 <div class="cards">
   <div class="card">
@@ -66,8 +68,11 @@
     {% if m.fail_n %}<div class="sub">실패로 기록된 건 {{ m.fail_n }}건</div>{% endif %}
   </div>
 </div>
+{% set week_split = p.grain == 'week' %}
+{% if day_split %}</div>{% endif %}
 {% if p.grain != 'day' %}
 <div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+{% if week_split %}<div class="split">{% endif %}
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
@@ -88,9 +93,18 @@
   </tbody>
 </table>
 </div>
+{% if week_split %}
+<div class="chart-card">
+  <h3>일별 완료 건수</h3>
+  <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }}</p>
+  <canvas id="dailyChart"></canvas>
+</div>
+</div>
+{% endif %}
 {% endif %}
 
 {% if dd and m.completed %}
+{% if day_split %}<div class="col">{% endif %}
 <div class="group-title">일 상세 · 시간 분포 {% if dd.time_n < 10 %}<span style="font-weight:400;color:var(--muted)">(표본 {{ dd.time_n }}건 · P90은 참고용)</span>{% endif %}</div>
 <div class="cards">
   <div class="card">
@@ -134,6 +148,7 @@
 </table>
 </div>
 {% else %}<div class="card empty">적시 미달 건이 없습니다.</div>{% endif %}
+{% if day_split %}</div></div>{% endif %}
 {% endif %}
 
 <div class="group-title">구간별 · 추이</div>
@@ -143,11 +158,13 @@
     <p class="d">로봇연계는 라이더 픽업 후 적재함 대기 구간이 포함됩니다. 일반 건은 도킹·로봇 구간이 없습니다.</p>
     <canvas id="segChart"></canvas>
   </div>
+  {% if not week_split %}
   <div class="chart-card">
     <h3>일별 완료 건수</h3>
     <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }}</p>
     <canvas id="dailyChart"></canvas>
   </div>
+  {% endif %}
   <div class="chart-card">
     <h3>주별 평균 접수→완료 (분)</h3>
     <p class="d">최근 12주 · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>

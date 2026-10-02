@@ -153,6 +153,9 @@ form.range { display: inline-flex; gap: 6px; align-items: center; }
 .chart-card p.d { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
 .chart-card canvas { max-height: 260px; }
 .chart-card.wide { grid-column: 1 / -1; }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.split > .col { min-width: 0; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
 
 table.heat { border-collapse: separate; border-spacing: 2px; font-size: 11px; }
 table.heat th { font-weight: 600; color: var(--faint); padding: 0 4px; }
