@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>수원 배송 KPI</title>
+<title>수원 로봇연계 배송 대시보드</title>
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="수원 로봇연계 배송 대시보드">
+<meta property="og:title" content="수원 로봇연계 배송 대시보드">
+<meta name="description" content="힐스테이트 푸르지오 수원 로봇연계 배송 KPI">
+<meta property="og:description" content="힐스테이트 푸르지오 수원 로봇연계 배송 KPI">
 <link rel="stylesheet" href="/static/app.css">
 <script>
   try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
@@ -24,7 +29,7 @@
 {% endif %}
 <div class="wrap">
   <header class="top">
-    <h1>{{ cfg.building }} · 배송 KPI</h1>
+    <h1>수원 로봇연계 배송 대시보드</h1>
     <span class="badge">모수: {{ cfg.store_type }}</span>
     <nav class="tabs">
       <a href="/" class="{{ 'on' if active == 'dashboard' }}">대시보드</a>

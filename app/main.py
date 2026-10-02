@@ -83,7 +83,7 @@ async def lifespan(_app):
     scheduler.stop()
 
 
-app = FastAPI(title="힐스테이트 푸르지오 수원 배송 KPI 대시보드", lifespan=lifespan)
+app = FastAPI(title="수원 로봇연계 배송 대시보드", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 
