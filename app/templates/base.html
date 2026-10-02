@@ -13,67 +13,94 @@
 <script src="/static/htmx.min.js"></script>
 </head>
 <body>
-{% set f = fresh %}
-{% if f.last_success is none %}
-  <div class="fresh err">데이터 기준: <b>수집 이력 없음</b> — <code>python scripts/collect.py</code> 실행 필요</div>
-{% else %}
-  {% set age = (today - f.last_success.date()).days %}
-  <div class="fresh {{ 'err' if f.last_failed else ('warn' if age >= 2 else '') }}">
-    데이터 기준: <b>{{ f.last_success.strftime('%Y-%m-%d') }} 수집 {{ f.last_success.strftime('%H:%M') }}</b>
-    {% if f.last_failed %} · 최근 수집 실패 — 마지막 성공 데이터를 표시 중{% elif age >= 2 %} · {{ age }}일 전 데이터입니다{% endif %}
-    · 일 단위는 전일(D-1)까지만 표시
-  </div>
-{% endif %}
+{% set titles = {
+  'dashboard': ('대시보드', cfg.building ~ ' · 로봇연계 배송 KPI'),
+  'robots': ('로봇 배송 건', '로봇연계 건별 결과 구분 · 특이사항 · 집계 제외 입력'),
+  'orders': ('전체 주문', '전체 주문 목록과 로봇 누락 사유 입력'),
+  'ask': ('AI 질문', '대시보드 집계 기준으로 답하는 질의응답'),
+  'settings': ('설정', '내 계정 · 사용자 관리'),
+  'import': ('데이터 가져오기', 'SQLite 파일 이관 · Redash 수집 상태'),
+} %}
+{% set t = titles.get(active, ('', '')) %}
+{% set role_label = {'admin': '관리자', 'user': '사용자'} %}
 <div class="app">
-  <aside class="side">
-    <div class="brand">로봇 연계 배송<br>KPI 대시보드</div>
-    <span class="badge">모수: {{ cfg.store_type }}</span>
-    <nav class="menu" aria-label="메뉴">
-      <a href="/" class="{{ 'on' if active == 'dashboard' }}">대시보드</a>
-      <a href="/robots" class="{{ 'on' if active == 'robots' }}">로봇 배송 건</a>
-      <a href="/orders" class="{{ 'on' if active == 'orders' }}">전체 주문</a>
-      <a href="/ask" class="{{ 'on' if active == 'ask' }}">AI 질문</a>
-      <span class="sep"></span>
-      <a href="/settings" class="{{ 'on' if active == 'settings' }}">설정</a>
-      {% if can_import %}<a href="/admin/import" class="{{ 'on' if active == 'import' }}">데이터 가져오기</a>{% endif %}
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">🤖</span><span>로봇 연계 배송<br>KPI 대시보드</span></div>
+    <div class="scope"><span class="badge">모수: {{ cfg.store_type }}</span></div>
+    <nav class="nav" aria-label="메뉴">
+      <div class="nav-sec">메인</div>
+      <a href="/" class="nav-item {{ 'active' if active == 'dashboard' }}"><span class="ic">🏠</span>대시보드</a>
+      <a href="/robots" class="nav-item {{ 'active' if active == 'robots' }}"><span class="ic">🤖</span>로봇 배송 건</a>
+      <a href="/orders" class="nav-item {{ 'active' if active == 'orders' }}"><span class="ic">📋</span>전체 주문</a>
+      <a href="/ask" class="nav-item {{ 'active' if active == 'ask' }}"><span class="ic">💬</span>AI 질문</a>
+      <div class="nav-sec">설정</div>
+      <a href="/settings" class="nav-item {{ 'active' if active == 'settings' }}"><span class="ic">⚙️</span>설정</a>
+      {% if can_import %}
+      <div class="nav-sec">관리자 전용</div>
+      <a href="/admin/import" class="nav-item {{ 'active' if active == 'import' }}"><span class="ic">📥</span>데이터 가져오기</a>
+      {% endif %}
     </nav>
-    <div class="side-foot">
-      {% if me and me.email %}<div class="me" title="{{ me.email }}">{{ me.email }}</div>{% endif %}
+    {% if me and me.email %}
+    <div class="me">
+      <div class="avatar">{{ me.email[:1] }}</div>
+      <div><div class="nm" title="{{ me.email }}">{{ me.email }}</div><div class="rl">{{ role_label.get(me.role, '') }}</div></div>
     </div>
-  </aside>
-<div class="wrap">
-
-  {% block controls %}
-  {% if active in ('dashboard', 'robots', 'orders') %}
-  {% set base = base_path or ('/' if active == 'dashboard' else '/robots') %}
-  {% set xq = extra_qs or '' %}
-  <div class="controls">
-    <div class="seg">
-      {% for g, name in grains %}
-        <a class="{{ 'on' if p.grain == g }}" href="{{ base }}?grain={{ g }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">{{ name }}</a>
-      {% endfor %}
-    </div>
-    {% if p.grain != 'custom' %}
-    <div class="pager">
-      <a href="{{ base }}?grain={{ p.grain }}&d={{ p.prev }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">◀</a>
-      <span class="plabel">{{ p.label }}</span>
-      <a href="{{ base }}?grain={{ p.grain }}&d={{ p.next }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">▶</a>
-    </div>
-    {% else %}
-    <form class="range" method="get" action="{{ base }}">
-      <input type="hidden" name="grain" value="custom">
-      {% if flt %}<input type="hidden" name="flt" value="{{ flt }}">{% endif %}
-      <input type="date" name="start" value="{{ p.start }}"> ~ <input type="date" name="end" value="{{ p.end }}">
-      <button class="theme" type="submit">조회</button>
-    </form>
     {% endif %}
-    {% if p.in_progress %}<span class="badge warn">진행 중 (경과 {{ p.elapsed_days }}일)</span>{% endif %}
-  </div>
-  {% endif %}
-  {% endblock %}
+  </aside>
 
-  {% block content %}{% endblock %}
-</div>
+  <div class="main">
+    <header class="topbar">
+      <h1>{{ t[0] }}</h1><span class="sub">{{ t[1] }}</span>
+      <div class="spacer"></div>
+      {% set f = fresh %}
+      {% if f.last_success is none %}
+        <span class="pill p-red"><span class="dot"></span>수집 이력 없음</span>
+      {% else %}
+        {% set age = (today - f.last_success.date()).days %}
+        {% if f.last_failed %}
+          <span class="pill p-red"><span class="dot"></span>최근 수집 실패 · 마지막 성공 {{ f.last_success.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% elif age >= 2 %}
+          <span class="pill p-amber"><span class="dot"></span>{{ age }}일 전 데이터 · {{ f.last_success.strftime('%Y-%m-%d %H:%M') }} 수집</span>
+        {% else %}
+          <span class="pill p-green"><span class="dot"></span>데이터 기준 {{ f.last_success.strftime('%Y-%m-%d %H:%M') }} 수집</span>
+        {% endif %}
+        <span class="meta">일 단위는 전일(D-1)까지만 표시</span>
+      {% endif %}
+    </header>
+
+    <div class="content">
+      {% block controls %}
+      {% if active in ('dashboard', 'robots', 'orders') %}
+      {% set base = base_path or ('/' if active == 'dashboard' else '/robots') %}
+      {% set xq = extra_qs or '' %}
+      <div class="controls">
+        <div class="seg">
+          {% for g, name in grains %}
+            <a class="{{ 'on' if p.grain == g }}" href="{{ base }}?grain={{ g }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">{{ name }}</a>
+          {% endfor %}
+        </div>
+        {% if p.grain != 'custom' %}
+        <div class="pager">
+          <a href="{{ base }}?grain={{ p.grain }}&d={{ p.prev }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">◀</a>
+          <span class="plabel">{{ p.label }}</span>
+          <a href="{{ base }}?grain={{ p.grain }}&d={{ p.next }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">▶</a>
+        </div>
+        {% else %}
+        <form class="range" method="get" action="{{ base }}">
+          <input type="hidden" name="grain" value="custom">
+          {% if flt %}<input type="hidden" name="flt" value="{{ flt }}">{% endif %}
+          <input type="date" name="start" value="{{ p.start }}"> ~ <input type="date" name="end" value="{{ p.end }}">
+          <button class="btn primary" type="submit">조회</button>
+        </form>
+        {% endif %}
+        {% if p.in_progress %}<span class="pill p-amber"><span class="dot"></span>진행 중 (경과 {{ p.elapsed_days }}일)</span>{% endif %}
+      </div>
+      {% endif %}
+      {% endblock %}
+
+      {% block content %}{% endblock %}
+    </div>
+  </div>
 </div>
 {% block scripts %}{% endblock %}
 </body>

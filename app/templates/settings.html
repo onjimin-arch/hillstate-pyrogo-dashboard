@@ -1,7 +1,5 @@
 {% extends "base.html" %}
 {% block content %}
-<h2 class="pg-title">설정</h2>
-
 <div class="card" style="margin-bottom:12px">
   <div class="k"><b>내 계정</b></div>
   <div class="v" style="font-size:18px">{{ me.email }} <span class="badge">{{ roles.get(me.role, me.role) }}</span></div>
@@ -26,7 +24,7 @@
 <div class="card" style="margin-bottom:12px">
   <div class="k"><b>등록된 사용자</b><span class="badge">{{ users|length }}명</span></div>
   <div class="u-wrap">
-  <table class="imp-tbl u-tbl">
+  <table class="imp-tbl tbl-l u-tbl">
     <thead><tr><th>이메일</th><th>이름</th><th>권한</th><th>등록</th><th></th></tr></thead>
     <tbody>
     {% for u in users %}
@@ -60,14 +58,6 @@
 
 {% block scripts %}
 {% if can_import %}
-<style>
-  .pg-title { font-size: 18px; margin: 8px 0 14px; }
-  .u-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
-  .u-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px; font: inherit; cursor: pointer; }
-  .u-btn.pri { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .u-tbl td.l { text-align: left; word-break: break-all; }
-  .u-wrap { overflow-x: auto; }
-</style>
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
@@ -93,7 +83,7 @@
         .then(function () { msg(email + ' 권한을 변경했습니다'); }).catch(function (e) { msg('변경 실패: ' + e.message); location.reload(); });
     });
     if (del) del.addEventListener('click', function () {
-      if (del.dataset.arm !== '1') { del.dataset.arm = '1'; del.textContent = '한 번 더 눌러 삭제'; return; }
+      if (del.dataset.arm !== '1') { del.dataset.arm = '1'; del.textContent = '한 번 더 눌러 삭제'; del.classList.add('del-arm'); return; }
       call('/settings/users/delete', {email: email})
         .then(function () { location.reload(); }).catch(function (e) { msg('삭제 실패: ' + e.message); });
     });

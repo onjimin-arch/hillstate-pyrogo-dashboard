@@ -55,4 +55,4 @@ def test_user_admin_guards(client):
 
 def test_sidebar_menu(client):
     html = client.get("/", headers=ADMIN).text
-    assert 'class="side"' in html and 'href="/settings"' in html and 'href="/admin/import"' in html
+    assert 'class="sidebar"' in html and 'href="/settings"' in html and 'href="/admin/import"' in html

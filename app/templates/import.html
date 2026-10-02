@@ -9,7 +9,7 @@
     <button type="button" id="c-go" class="imp-btn">지금 수집</button></div>
   <div class="sub" id="c-info"></div>
   <div id="c-err" class="badge err" hidden></div>
-  <table class="imp-tbl"><thead><tr><th>시각</th><th>결과</th><th>건수</th><th>메시지</th></tr></thead>
+  <table class="imp-tbl tbl-l"><thead><tr><th>시각</th><th>결과</th><th>건수</th><th>메시지</th></tr></thead>
     <tbody id="c-rows"></tbody></table>
 </div>
 <div class="card" style="margin-bottom:12px">
@@ -33,17 +33,6 @@
 {% endblock %}
 
 {% block scripts %}
-<style>
-  .imp-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  .imp-form button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 20px; font: inherit; cursor: pointer; }
-  .imp-form button:disabled { opacity: .5; cursor: default; }
-  .imp-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px; font: inherit; cursor: pointer; }
-  .imp-tbl td.l { text-align: left; word-break: break-all; }
-  .imp-bar { width: 100%; height: 14px; margin: 10px 0; }
-  .imp-tbl { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
-  .imp-tbl th, .imp-tbl td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border); }
-  .imp-tbl th:first-child, .imp-tbl td:first-child { text-align: left; }
-</style>
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
