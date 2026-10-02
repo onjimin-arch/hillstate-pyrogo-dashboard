@@ -10,9 +10,6 @@
 <meta name="description" content="힐스테이트 푸르지오 수원 로봇연계 배송 KPI">
 <meta property="og:description" content="힐스테이트 푸르지오 수원 로봇연계 배송 KPI">
 <link rel="stylesheet" href="/static/app.css">
-<script>
-  try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
-</script>
 <script src="/static/htmx.min.js"></script>
 </head>
 <body>
@@ -42,7 +39,6 @@
     </nav>
     <div class="side-foot">
       {% if me and me.email %}<div class="me" title="{{ me.email }}">{{ me.email }}</div>{% endif %}
-      <button class="theme" type="button" onclick="toggleTheme()" aria-label="테마 전환">◐ 테마</button>
     </div>
   </aside>
 <div class="wrap">
@@ -79,16 +75,6 @@
   {% block content %}{% endblock %}
 </div>
 </div>
-<script>
-  function toggleTheme() {
-    var cur = document.documentElement.dataset.theme ||
-      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    var next = cur === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("theme", next); } catch (e) {}
-    window.dispatchEvent(new Event("themechange"));
-  }
-</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>
