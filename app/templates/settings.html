@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="pg-title">설정</h2>
+
+<div class="card" style="margin-bottom:12px">
+  <div class="k"><b>내 계정</b></div>
+  <div class="v" style="font-size:18px">{{ me.email }} <span class="badge">{{ roles.get(me.role, me.role) }}</span></div>
+  <div class="sub">회사 로그인 이메일로 접속합니다. 등록된 사용자만 이 대시보드를 볼 수 있습니다.</div>
+</div>
+
+{% if can_import %}
+<div class="card" style="margin-bottom:12px">
+  <div class="k"><b>사용자 등록</b></div>
+  <form id="add" class="u-form">
+    <input type="text" id="n-email" placeholder="이메일 (예: name@barogo.com)" size="30" required autocomplete="off">
+    <input type="text" id="n-name" placeholder="이름 (선택)" size="14" autocomplete="off">
+    <select id="n-role">
+      {% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if k == 'user' }}>{{ v }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="u-btn pri">등록</button>
+  </form>
+  <div class="sub" id="u-msg" aria-live="polite"></div>
+  <div class="sub">관리자는 사용자 관리·데이터 가져오기·수집 상태를 사용할 수 있고, 사용자는 대시보드 조회와 기록 입력만 할 수 있습니다.</div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <div class="k"><b>등록된 사용자</b><span class="badge">{{ users|length }}명</span></div>
+  <div class="u-wrap">
+  <table class="imp-tbl u-tbl">
+    <thead><tr><th>이메일</th><th>이름</th><th>권한</th><th>등록</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr data-email="{{ u.email }}">
+        <td class="l">{{ u.email }}</td>
+        <td class="l">{{ u.name }}</td>
+        <td>
+          {% if u.fixed or u.email == me.email %}
+            <span class="badge">{{ roles[u.role] }}{{ ' · 고정' if u.fixed }}</span>
+          {% else %}
+            <select class="role">
+              {% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if k == u.role }}>{{ v }}</option>{% endfor %}
+            </select>
+          {% endif %}
+        </td>
+        <td class="l sub">{% if u.created_at %}{{ u.created_at.strftime('%Y-%m-%d') }} · {{ u.created_by or '' }}{% endif %}</td>
+        <td>{% if not u.fixed and u.email != me.email %}<button type="button" class="u-btn del">삭제</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="k"><b>관리 도구</b></div>
+  <div class="sub"><a href="/admin/import">데이터 가져오기 · Redash 수집 상태</a></div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if can_import %}
+<style>
+  .pg-title { font-size: 18px; margin: 8px 0 14px; }
+  .u-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .u-btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 12px; font: inherit; cursor: pointer; }
+  .u-btn.pri { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .u-tbl td.l { text-align: left; word-break: break-all; }
+  .u-wrap { overflow-x: auto; }
+</style>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function msg(t) { $('u-msg').textContent = t || ''; }
+  function call(url, body) {
+    return fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+                       body: JSON.stringify(body)}).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) throw new Error(d.detail || r.status);
+        return d;
+      });
+    });
+  }
+  $('add').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    call('/settings/users', {email: $('n-email').value, name: $('n-name').value, role: $('n-role').value})
+      .then(function () { location.reload(); }).catch(function (e) { msg('등록 실패: ' + e.message); });
+  });
+  document.querySelectorAll('tr[data-email]').forEach(function (tr) {
+    var email = tr.dataset.email, sel = tr.querySelector('select.role'), del = tr.querySelector('button.del');
+    if (sel) sel.addEventListener('change', function () {
+      call('/settings/users', {email: email, role: sel.value})
+        .then(function () { msg(email + ' 권한을 변경했습니다'); }).catch(function (e) { msg('변경 실패: ' + e.message); location.reload(); });
+    });
+    if (del) del.addEventListener('click', function () {
+      if (del.dataset.arm !== '1') { del.dataset.arm = '1'; del.textContent = '한 번 더 눌러 삭제'; return; }
+      call('/settings/users/delete', {email: email})
+        .then(function () { location.reload(); }).catch(function (e) { msg('삭제 실패: ' + e.message); });
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

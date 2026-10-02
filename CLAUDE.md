@@ -14,7 +14,9 @@
 - 서버: `Procfile` (`uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}`). `/` 가 200 이면 헬스체크 통과. 테이블은 시작 시 `create_all` 로 재실행 안전하게 생성.
 - 로그인: 앱 앞단 회사 로그인 사용. 접속자는 `x-amzn-oidc-data` JWT 의 email → `updated_by`. 웹훅 엔드포인트 없음(추가 시 `/webhooks/` + 서명 검증 + 401).
 - 로컬 파일에 데이터를 저장하지 않는다(컨테이너는 배포마다 초기화). 수집: `python scripts/collect.py` (같은 `DATABASE_URL` 로 실행, `--full` 백필, `--xlsx` 엑셀 적재)
-- 데이터 가져오기: `/admin/import` (x-amzn-oidc-data email 이 jmlee@barogo.com 일 때만, 아니면 403). 로컬 SQLite 업로드 → 임시 디스크 파일 → 백그라운드 스레드가 1,000행씩 `ON CONFLICT DO NOTHING` 적재 후 id 시퀀스 보정(`app/importer.py`). 진행 상태는 프로세스 메모리(컨테이너 1개 전제), 임시 파일은 끝나면 삭제. `IMPORT_MAX_MB`(기본 500).
+- 접근 제어: 전 라우트(`/health`·정적 파일 제외)에 `auth_gate`. x-amzn-oidc-data 이메일이 `app_users` 에 등록(또는 기본 관리자 `jmlee@barogo.com`, 환경변수 `ADMIN_EMAILS` 로 추가)된 경우만 통과. 권한 admin/user, 관리는 `/settings`(관리자 전용). 로그인 헤더가 없으면 401(단, `/` 는 플랫폼 헬스체크용으로 200+안내문만). 로컬 개발은 `AUTH_DISABLED=1`(헤더 없는 요청만 관리자 취급, 배포 환경에는 설정 금지).
+- 레이아웃: 좌측 사이드바 메뉴(`base.html`). 설정 화면 `/settings`.
+- 데이터 가져오기: `/admin/import` (관리자만). 로컬 SQLite 업로드 → 임시 디스크 파일 → 백그라운드 스레드가 1,000행씩 `ON CONFLICT DO NOTHING` 적재 후 id 시퀀스 보정(`app/importer.py`). 진행 상태는 프로세스 메모리(컨테이너 1개 전제), 임시 파일은 끝나면 삭제. `IMPORT_MAX_MB`(기본 500).
 - 자동 수집: 앱 시작 시 `app/scheduler.py` 스레드가 `COLLECT_INTERVAL_MIN`(기본 60)분마다 수집. 이력이 없으면 첫 실행은 전체 백필. `AUTO_COLLECT=0` 으로 끔(외부 스케줄러 사용 시). REDASH_* 미설정이면 시작 로그에 경고만 남기고 안 돈다.
 - 테스트: `python -m pytest tests -q` (SQLite 인메모리 사용)
 

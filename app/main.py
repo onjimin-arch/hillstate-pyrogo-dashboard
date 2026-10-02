@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -17,13 +18,14 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import Body
 from fastapi.responses import JSONResponse
+from html import escape as html_escape
 from starlette.concurrency import run_in_threadpool
 
 from . import ai, importer, kpi, scheduler
 from .config import CFG, ROOT
 from sqlalchemy import func, select
 
-from .db import CollectLog, RawOrder, RobotOrderNote, get_session_factory
+from .db import AppUser, CollectLog, RawOrder, RobotOrderNote, get_session_factory
 
 BASE = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")     # 로컬 개발용. 배포 환경에서는 플랫폼이 환경변수를 주입한다.
@@ -49,7 +51,17 @@ def current_user(request: Request) -> str | None:
         request.client.host if request.client else None)
 
 
-IMPORT_ADMIN = "jmlee@barogo.com"
+def get_db():
+    SL = get_session_factory()
+    with SL() as s:
+        yield s
+
+
+# 기본 관리자: DB 에 등록하지 않아도 항상 관리자(잠금 방지). 추가는 환경변수 ADMIN_EMAILS(쉼표 구분).
+BOOTSTRAP_ADMINS = {"jmlee@barogo.com"} | {
+    e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+ROLES = {"admin": "관리자", "user": "사용자"}
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def oidc_email(request: Request) -> str | None:
@@ -66,12 +78,42 @@ def oidc_email(request: Request) -> str | None:
     return email.strip().lower() if isinstance(email, str) else None
 
 
-def require_import_admin(request: Request) -> str:
+class AccessDenied(Exception):
+    def __init__(self, status: int, msg: str, email: str | None = None):
+        self.status, self.msg, self.email = status, msg, email
+
+
+def auth_gate(request: Request, db=Depends(get_db)) -> None:
+    """모든 라우트 공통: 회사 로그인 이메일이 등록된 사용자(또는 기본 관리자)일 때만 통과."""
+    if request.url.path == "/health":
+        return
     email = oidc_email(request)
-    if email != IMPORT_ADMIN:
-        log.warning("데이터 가져오기 접근 거부 email=%s path=%s", email, request.url.path)
-        raise HTTPException(403, "접근 권한이 없습니다")
-    return email
+    if email is None:
+        if os.getenv("AUTH_DISABLED") == "1":      # 로컬 개발 전용: 로그인 헤더가 없는 요청만 관리자로 취급
+            request.state.email, request.state.role = "local", "admin"
+            return
+        # 플랫폼 헬스체크(`/`, 로그인 헤더 없음)는 200 으로 통과시키되 화면에는 아무 데이터도 보이지 않는다.
+        raise AccessDenied(200 if request.url.path == "/" else 401, "회사 로그인이 필요합니다.")
+    if email in BOOTSTRAP_ADMINS:
+        role = "admin"
+    else:
+        u = db.get(AppUser, email)
+        role = u.role if u else None
+    if role is None:
+        log.warning("미등록 사용자 접근 거부 email=%s path=%s", email, request.url.path)
+        raise AccessDenied(403, "등록된 사용자만 접속할 수 있습니다. 관리자에게 등록을 요청하세요.", email)
+    request.state.email, request.state.role = email, role
+
+
+def require_admin(request: Request) -> str:
+    if getattr(request.state, "role", None) != "admin":
+        log.warning("관리자 전용 접근 거부 email=%s path=%s", getattr(request.state, "email", None),
+                    request.url.path)
+        raise HTTPException(403, "관리자만 사용할 수 있습니다")
+    return request.state.email
+
+
+require_import_admin = require_admin     # 데이터 가져오기·수집 화면도 관리자 전용
 
 
 @asynccontextmanager
@@ -83,15 +125,9 @@ async def lifespan(_app):
     scheduler.stop()
 
 
-app = FastAPI(title="로봇 연계 배송 KPI 대시보드", lifespan=lifespan)
+app = FastAPI(title="로봇 연계 배송 KPI 대시보드", lifespan=lifespan, dependencies=[Depends(auth_gate)])
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
-
-
-def get_db():
-    SL = get_session_factory()
-    with SL() as s:
-        yield s
 
 
 def _date(v: str | None) -> date | None:
@@ -122,7 +158,8 @@ def _period_ctx(grain, d, start, end):
 def _common(request: Request, p, db, active):
     return {
         "request": request, "p": p, "cfg": CFG, "active": active,
-        "can_import": oidc_email(request) == IMPORT_ADMIN,
+        "me": {"email": getattr(request.state, "email", None), "role": getattr(request.state, "role", None)},
+        "can_import": getattr(request.state, "role", None) == "admin",
         "fresh": kpi.freshness(db), "today": date.today(),
         "grains": [("day", "일"), ("week", "주"), ("month", "월"), ("custom", "직접 선택")],
     }
@@ -284,6 +321,91 @@ async def import_upload(request: Request, user=Depends(require_import_admin)):
     log.info("import start by=%s file=%s bytes=%d", user, name, size)
     importer.start(path, get_session_factory().kw["bind"], name)
     return {"status": "running"}
+
+
+@app.exception_handler(AccessDenied)
+async def access_denied(request: Request, exc: AccessDenied):
+    if "text/html" in request.headers.get("accept", ""):
+        html = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+                "<title>로봇 연계 배송 KPI 대시보드</title><body style='font:15px system-ui,sans-serif;"
+                "max-width:480px;margin:15vh auto;padding:0 20px'><h2>접근할 수 없습니다</h2>"
+                f"<p>{exc.msg}</p>" + (f"<p style='color:#666'>접속 계정: {html_escape(exc.email)}</p>" if exc.email else "")
+                + "</body>")
+        return HTMLResponse(html, status_code=exc.status)
+    return JSONResponse({"detail": exc.msg}, status_code=exc.status)
+
+
+# ---------------------------------------------------------------- 설정 · 사용자 관리
+def _user_rows(db):
+    rows = [{"email": e, "role": "admin", "name": "기본 관리자", "fixed": True, "created_at": None, "created_by": None}
+            for e in sorted(BOOTSTRAP_ADMINS)]
+    for u in db.scalars(select(AppUser).order_by(AppUser.created_at)):
+        if u.email not in BOOTSTRAP_ADMINS:
+            rows.append({"email": u.email, "role": u.role, "name": u.name or "", "fixed": False,
+                         "created_at": u.created_at, "created_by": u.created_by})
+    return rows
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db=Depends(get_db)):
+    p = kpi.resolve_period("week", None, None, None)
+    ctx = _common(request, p, db, "settings")
+    ctx.update(roles=ROLES, users=_user_rows(db) if ctx["can_import"] else [])
+    return templates.TemplateResponse(request, "settings.html", ctx)
+
+
+def _admin_write(request: Request) -> str:
+    me = require_admin(request)
+    if "x-requested-with" not in request.headers:     # 커스텀 헤더 필수(CSRF 방지)
+        raise HTTPException(400, "잘못된 요청")
+    return me
+
+
+def _norm_email(v) -> str:
+    e = str(v or "").strip().lower()
+    if len(e) > 254 or not EMAIL_RE.match(e):
+        raise HTTPException(400, "이메일 형식이 올바르지 않습니다")
+    return e
+
+
+def _norm_role(v) -> str:
+    if v not in ROLES:
+        raise HTTPException(400, "권한은 관리자/사용자 중 하나여야 합니다")
+    return v
+
+
+@app.post("/settings/users")
+def user_save(request: Request, payload: dict = Body(...), db=Depends(get_db)):
+    """사용자 등록(이미 있으면 권한·이름 수정)."""
+    me = _admin_write(request)
+    email, role = _norm_email(payload.get("email")), _norm_role(payload.get("role", "user"))
+    if email in BOOTSTRAP_ADMINS:
+        raise HTTPException(400, "기본 관리자는 변경할 수 없습니다")
+    if email == me:
+        raise HTTPException(400, "본인 계정은 변경할 수 없습니다")
+    u = db.get(AppUser, email) or AppUser(email=email, created_at=datetime.now(), created_by=me)
+    u.role = role
+    if "name" in payload:
+        u.name = (str(payload["name"] or "").strip()[:100]) or None
+    db.merge(u)
+    db.commit()
+    log.info("user saved email=%s role=%s by=%s", email, role, me)
+    return {"ok": True}
+
+
+@app.post("/settings/users/delete")
+def user_delete(request: Request, payload: dict = Body(...), db=Depends(get_db)):
+    me = _admin_write(request)
+    email = _norm_email(payload.get("email"))
+    if email in BOOTSTRAP_ADMINS or email == me:
+        raise HTTPException(400, "기본 관리자와 본인 계정은 삭제할 수 없습니다")
+    u = db.get(AppUser, email)
+    if u is None:
+        raise HTTPException(404, "등록된 사용자가 아닙니다")
+    db.delete(u)
+    db.commit()
+    log.info("user deleted email=%s by=%s", email, me)
+    return {"ok": True}
 
 
 @app.get("/health")

@@ -76,6 +76,16 @@ class RobotOrderNote(Base):
     updated_by: Mapped[str | None] = mapped_column(String)
 
 
+class AppUser(Base):
+    """접속 허용 사용자(등록된 이메일만 접속 가능). role: admin / user. 기본 관리자는 코드(BOOTSTRAP_ADMINS)에 고정."""
+    __tablename__ = "app_users"
+    email: Mapped[str] = mapped_column(String, primary_key=True)   # 소문자
+    role: Mapped[str] = mapped_column(String, default="user")
+    name: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_by: Mapped[str | None] = mapped_column(String)
+
+
 class CollectLog(Base):
     __tablename__ = "collect_log"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

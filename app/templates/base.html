@@ -27,22 +27,28 @@
     · 일 단위는 전일(D-1)까지만 표시
   </div>
 {% endif %}
-<div class="wrap">
-  <header class="top">
-    <h1>로봇 연계 배송 KPI 대시보드</h1>
+<div class="app">
+  <aside class="side">
+    <div class="brand">로봇 연계 배송<br>KPI 대시보드</div>
     <span class="badge">모수: {{ cfg.store_type }}</span>
-    <nav class="tabs">
+    <nav class="menu" aria-label="메뉴">
       <a href="/" class="{{ 'on' if active == 'dashboard' }}">대시보드</a>
       <a href="/robots" class="{{ 'on' if active == 'robots' }}">로봇 배송 건</a>
       <a href="/orders" class="{{ 'on' if active == 'orders' }}">전체 주문</a>
       <a href="/ask" class="{{ 'on' if active == 'ask' }}">AI 질문</a>
+      <span class="sep"></span>
+      <a href="/settings" class="{{ 'on' if active == 'settings' }}">설정</a>
       {% if can_import %}<a href="/admin/import" class="{{ 'on' if active == 'import' }}">데이터 가져오기</a>{% endif %}
     </nav>
-    <button class="theme" type="button" onclick="toggleTheme()" aria-label="테마 전환">◐</button>
-  </header>
+    <div class="side-foot">
+      {% if me and me.email %}<div class="me" title="{{ me.email }}">{{ me.email }}</div>{% endif %}
+      <button class="theme" type="button" onclick="toggleTheme()" aria-label="테마 전환">◐ 테마</button>
+    </div>
+  </aside>
+<div class="wrap">
 
   {% block controls %}
-  {% if active not in ('ask', 'import') %}
+  {% if active in ('dashboard', 'robots', 'orders') %}
   {% set base = base_path or ('/' if active == 'dashboard' else '/robots') %}
   {% set xq = extra_qs or '' %}
   <div class="controls">
@@ -71,6 +77,7 @@
   {% endblock %}
 
   {% block content %}{% endblock %}
+</div>
 </div>
 <script>
   function toggleTheme() {

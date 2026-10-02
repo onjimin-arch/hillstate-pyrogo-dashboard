@@ -102,6 +102,7 @@ def jwt(email):
 def client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     from app import main
+    monkeypatch.delenv("AUTH_DISABLED", raising=False)       # 실제 접근 제어 경로로 테스트
     monkeypatch.setattr(dbm, "SessionLocal", dbm.make_session_factory("sqlite://"))
     monkeypatch.setattr(importer, "UPLOAD_DIR", tmp_path / "up")
     monkeypatch.setattr(importer, "JOB", None)
@@ -110,15 +111,21 @@ def client(monkeypatch, tmp_path):
 
 
 def test_only_admin_email_can_open(client):
-    assert client.get("/admin/import").status_code == 403
-    assert client.get("/admin/import", headers=jwt("other@barogo.com")).status_code == 403
-    assert client.get("/admin/import", headers={"x-editor": "jmlee@barogo.com"}).status_code == 403
+    assert client.get("/admin/import").status_code == 401                                  # 로그인 헤더 없음
+    assert client.get("/admin/import", headers=jwt("other@barogo.com")).status_code == 403   # 미등록
+    assert client.get("/admin/import", headers={"x-editor": "jmlee@barogo.com"}).status_code == 401
     assert client.get("/admin/import/status", headers=jwt("other@barogo.com")).status_code == 403
     r = client.post("/admin/import/upload", content=b"x", headers={**jwt("other@barogo.com"), "x-filename": "a"})
     assert r.status_code == 403
     ok = client.get("/admin/import", headers=jwt("jmlee@barogo.com"))
     assert ok.status_code == 200 and "가져오기 시작" in ok.text
-    assert "데이터 가져오기" not in client.get("/", headers=jwt("other@barogo.com")).text
+    # 미등록 사용자는 대시보드도 못 연다. 일반 사용자로 등록하면 열리되 관리 메뉴는 숨겨진다.
+    assert client.get("/", headers=jwt("other@barogo.com")).status_code == 403
+    client.post("/settings/users", json={"email": "other@barogo.com", "role": "user"},
+                headers={**jwt("jmlee@barogo.com"), "x-requested-with": "x"})
+    page = client.get("/", headers=jwt("other@barogo.com"))
+    assert page.status_code == 200 and "데이터 가져오기" not in page.text
+    assert client.get("/admin/import", headers=jwt("other@barogo.com")).status_code == 403   # 일반 사용자도 관리자 전용은 불가
 
 
 def test_upload_rejects_non_sqlite_and_missing_header(client):
