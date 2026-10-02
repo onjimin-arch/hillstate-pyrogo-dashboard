@@ -1,0 +1,26 @@
+# 단지/필터/baseline/목표값 설정 (타 단지 확장 시 이 파일만 복제)
+building: "힐스테이트 푸르지오 수원"
+store_type: "일반(로드샵)"          # 집계 모수 필터 (상점구분)
+exclude_today: true                  # 당일 미표시 (D-1까지)
+
+# 8월 baseline (Notion 기준 — 대시보드 로직 재산출값과 대조 후 확정할 것: 설계서 §5-8)
+baseline:
+  label: "8월 baseline"
+  orders: 564
+  total_min: 29.0                    # 접수→완료 평균(분)
+  pickup_min: 12.0                   # 픽업→완료 평균(분)
+
+targets:
+  timely_pct: 90                     # 로봇 적시 배송률 목표(%)
+  success_pct: 90                    # 로봇 배송 성공률 목표(%)
+timely_threshold_sec: 420            # 적재함닫힘→로봇배송완료 7분
+
+poc:
+  start: "2026-09-29"
+  end: "2026-10-30"
+
+collect:
+  full_start: "2025-01-01"           # --full 백필 시작일
+  rolling_days: 7                    # 매일 최근 N일 재수집 후 upsert
+  retries: 3
+  retry_interval_sec: 300

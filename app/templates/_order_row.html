@@ -1,0 +1,29 @@
+<tr id="row-{{ r.delivery_id }}" class="{{ 'ex' if r.exclude }} {{ 'saved' if saved }}"
+    hx-post="/orders/{{ r.delivery_id }}/note" hx-trigger="change" hx-include="closest tr"
+    hx-target="this" hx-swap="outerHTML">
+  <td>{{ r.ord_dt | dt('%m-%d %H:%M') }}</td>
+  <td>{% if r.is_robot %}<span class="badge">로봇연계</span>{% else %}일반{% endif %}
+    {% if r.robot_name %}<div class="mut">{{ r.robot_name }}</div>{% endif %}</td>
+  <td>{{ r.order_source or '-' }}<div class="mut">{{ r.store_name or '' }}</div></td>
+  <td>{{ r.store_type or '-' }}{% if not r.in_scope %}<div class="mut">집계 모수 아님</div>{% endif %}</td>
+  <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
+  <td>{{ r.total_min | num(1) }}분</td>
+  <td>{{ r.dispatch_count if r.dispatch_count is not none else '-' }}</td>
+  <td>
+    {% if r.is_robot %}
+      <span class="mut">로봇 처리 건<br>(결과 구분은 '로봇 배송 건' 탭)</span>
+    {% else %}
+    <select name="miss_reason" aria-label="사유 구분">
+      <option value="" {{ 'selected' if not r.miss_reason }}>-</option>
+      {% for t in miss_reasons %}
+        <option value="{{ t }}" {{ 'selected' if r.miss_reason == t }}>{{ t }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </td>
+  <td><input type="text" name="note" value="{{ r.note }}" placeholder="누락/특이 사유" aria-label="특이사항"></td>
+  <td style="text-align:center">
+    <input type="checkbox" name="exclude" value="1" {{ 'checked' if r.exclude }} aria-label="집계 제외">
+  </td>
+  <td class="mut">{% if r.updated_at %}{{ r.updated_at | dt }}<br>{{ r.updated_by or '' }}{% if saved %}<br><b style="color:var(--s3)">저장됨</b>{% endif %}{% else %}-{% endif %}</td>
+</tr>

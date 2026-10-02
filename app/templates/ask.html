@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<p class="help">
+  Redash에서 수집한 데이터를 기반으로 질문에 바로 답합니다. 숫자는 대시보드와 같은 집계(집계 제외 반영) 또는 읽기 전용 조회로만 가져옵니다.
+  질문 내용과 조회된 집계 결과가 OpenAI로 전송됩니다(라이더ID·원본 데이터 제외).
+</p>
+{% if not ai_ready %}
+  <div class="card" style="margin-bottom:12px"><span class="badge err">설정 필요</span>
+    <code>.env</code>의 <code>OPENAI_API_KEY</code>를 입력하고 서버를 다시 시작하세요.</div>
+{% endif %}
+
+<div class="chat">
+  <div class="chat-head"><button type="button" id="reset" class="reset">대화 초기화</button></div>
+  <div id="log" class="log" aria-live="polite">
+    <div class="msg a">궁금한 점을 물어보세요. 예: “어제 로봇 적시 배송률은?”</div>
+  </div>
+  <div class="chips">
+    {% for q in ["어제 로봇 적시 배송률이랑 완료 건수 알려줘", "이번 주 로봇연계와 일반의 평균 배송시간 비교해줘",
+                 "PoC 시작 이후 로봇 이용률 추이를 요약해줘", "특이사항이 기록된 로봇 건들을 정리해줘",
+                 "로봇 건이 가장 많이 몰리는 시간대는?", "적재함닫힘→완료가 가장 오래 걸린 로봇 건 5개"] %}
+      <button type="button" class="chip">{{ q }}</button>
+    {% endfor %}
+  </div>
+  <form id="f" class="ask-form">
+    <textarea id="q" rows="2" placeholder="질문을 입력하세요 (Enter 전송, Shift+Enter 줄바꿈)" aria-label="질문"></textarea>
+    <button type="submit" id="send">질문</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var log = document.getElementById('log'), q = document.getElementById('q'),
+      f = document.getElementById('f'), send = document.getElementById('send');
+  var history = [];
+  var greeting = log.innerHTML;
+  document.getElementById('reset').addEventListener('click', function () {
+    history = []; log.innerHTML = greeting; q.value = ''; q.focus();
+  });
+  function add(cls, text) {
+    var d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text;
+    log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+  }
+  function steps(div, list) {
+    if (!list || !list.length) return;
+    var det = document.createElement('details'); det.className = 'steps';
+    var sm = document.createElement('summary'); sm.textContent = '근거: 조회 ' + list.length + '건';
+    det.appendChild(sm);
+    list.forEach(function (s) {
+      var p = document.createElement('div');
+      var a = s.tool === 'query_sql' ? s.args.sql : JSON.stringify(s.args);
+      p.textContent = s.tool + ' → ' + s.summary + '\n' + a; p.className = 'step';
+      det.appendChild(p);
+    });
+    div.appendChild(det);
+  }
+  async function ask(text) {
+    if (!text.trim()) return;
+    add('u', text); q.value = ''; send.disabled = true;
+    var wait = add('a pending', '조회 중…');
+    try {
+      var r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: text, history: history }) });
+      var j = await r.json();
+      wait.classList.remove('pending');
+      if (!r.ok) { wait.textContent = j.error || '오류가 발생했습니다'; wait.classList.add('err'); }
+      else { wait.textContent = j.answer; steps(wait, j.steps);
+             history.push({ role: 'user', content: text }, { role: 'assistant', content: j.answer }); }
+    } catch (e) { wait.classList.remove('pending'); wait.textContent = '서버에 연결할 수 없습니다'; wait.classList.add('err'); }
+    send.disabled = false; q.focus(); log.scrollTop = log.scrollHeight;
+  }
+  f.addEventListener('submit', function (e) { e.preventDefault(); ask(q.value); });
+  q.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(q.value); }
+  });
+  document.querySelectorAll('.chip').forEach(function (c) { c.addEventListener('click', function () { ask(c.textContent); }); });
+})();
+</script>
+{% endblock %}

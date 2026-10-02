@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+{% set qs = 'grain=' ~ p.grain ~ ('&d=' ~ p.start if p.grain != 'custom' else '&start=' ~ p.start ~ '&end=' ~ p.end) %}
+<p class="help">
+  로봇이 처리한 건만 모아 보여줍니다. <b>결과 구분</b>과 <b>특이사항</b>을 입력하면 자동 저장됩니다(입력칸을 벗어날 때).
+  <b>결과 구분</b>: <b>정상(완료)</b> 기본 · <b>완료(오류)</b> 로봇은 제대로 배송했으나 시스템 이벤트 오류로 시간 데이터가 이상한 건
+  (성공·건수에는 포함, <u>평균 시간·적시 배송률에서만 제외</u>) · <b>실패</b> · <b>기타</b>(성공률 분모에서 제외).
+  <b>집계 제외</b>를 체크한 건은 모든 집계(건수·이용률·시간·품질·차트)에서 빠집니다.
+  실패 건은 제외하지 말고 '실패'로 기록하세요(성공률이 부풀려집니다).
+  <label style="margin-left:8px">입력자 <input type="text" id="editor" placeholder="이름" size="8"></label>
+</p>
+<div class="controls">
+  <div class="filters">
+    <a class="{{ 'on' if not flt }}" href="/robots?{{ qs }}">전체</a>
+    <a class="{{ 'on' if flt == 'noted' }}" href="/robots?{{ qs }}&flt=noted">특이사항 있음</a>
+    <a class="{{ 'on' if flt == 'error' }}" href="/robots?{{ qs }}&flt=error">완료(오류)</a>
+    <a class="{{ 'on' if flt == 'failed' }}" href="/robots?{{ qs }}&flt=failed">실패</a>
+    <a class="{{ 'on' if flt == 'excluded' }}" href="/robots?{{ qs }}&flt=excluded">집계 제외</a>
+  </div>
+  <span class="badge">{{ rows | length }}건</span>
+</div>
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>접수</th><th>로봇</th><th>주문처 / 상점</th><th>상점구분</th><th>접수→완료</th>
+    <th>적재함닫힘→완료</th><th>배차횟수</th><th>결과 구분</th><th>특이사항</th><th>집계 제외</th><th>수정</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}{% include "_robot_row.html" %}{% else %}
+  <tr><td colspan="11" class="empty">조건에 맞는 로봇 배송 건이 없습니다.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  var ed = document.getElementById('editor');
+  try { ed.value = localStorage.getItem('editor') || ''; } catch (e) {}
+  ed.addEventListener('change', function () { try { localStorage.setItem('editor', ed.value); } catch (e) {} });
+  document.body.addEventListener('htmx:configRequest', function (ev) {
+    if (ed.value.trim()) ev.detail.headers['X-Editor'] = encodeURIComponent(ed.value.trim());
+  });
+</script>
+{% endblock %}

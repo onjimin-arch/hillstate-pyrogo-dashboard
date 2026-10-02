@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block content %}
+{% set m = metrics %}
+
+{% if m.completed == 0 %}
+  <div class="card empty">선택한 기간({{ p.label }})에 집계할 데이터가 없습니다.
+    {% if p.eff_end < p.start %}<br>아직 전일(D-1) 기준으로 표시 가능한 날짜가 아닙니다.{% endif %}</div>
+{% endif %}
+
+<div class="group-title">완료 건수 · 로봇 이용</div>
+<div class="cards">
+  <div class="card">
+    <div class="k">로드샵 완료 건수</div>
+    <div class="v">{{ m.completed }}<small>건</small></div>
+    <div class="sub">일반 {{ m.general_done }} · 로봇연계 {{ m.robot_done }}</div>
+  </div>
+  <div class="card">
+    <div class="k">로봇 완료 건수</div>
+    <div class="v">{{ m.robot_done }}<small>건</small></div>
+    <div class="sub">로봇 이용률 {{ m.usage_pct | num(1, '%') }} (로봇연계 ÷ 로드샵 전체 완료)</div>
+  </div>
+  <div class="card">
+    <div class="k">특이사항 · 집계 제외 <a href="/robots?grain={{ p.grain }}&d={{ p.start }}{% if p.grain == 'custom' %}&start={{ p.start }}&end={{ p.end }}{% endif %}&flt=noted" style="margin-left:auto;font-size:12px">목록 보기 ›</a></div>
+    <div class="v">{{ m.excluded_n }}<small>건 제외</small></div>
+    <div class="sub">특이사항 기록 {{ m.annotated_n }}건 (비고 입력 {{ m.noted_n }}건)</div>
+    <div class="sub">완료(오류) {{ m.err_n }}건(시간만 제외) · 실패 {{ m.fail_n }}건 · 기타 {{ m.other_n }}건</div>
+    <div class="sub">로봇 누락 사유 기록 {{ m.miss_n }}건</div>
+  </div>
+</div>
+
+<div class="group-title">배송시간 (평균{{ ', 일 단위는 표본이 작아 변동이 큽니다' if p.grain == 'day' }})</div>
+<div class="cards">
+  <div class="card" title="중앙값 {{ m.median_total_min | num(1, '분') }}">
+    <div class="k">접수 → 완료 평균</div>
+    <div class="v">{{ m.avg_total_min | num(1) }}<small>분</small></div>
+    <div class="delta">{{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분 대비
+      {% if m.delta_total_min is not none %}{{ '%+.1f' | format(m.delta_total_min) }}분{% else %}-{% endif %}</div>
+    <div class="sub">중앙값 {{ m.median_total_min | num(1, '분') }} · 일반 {{ m.avg_total_general_min | num(1, '분') }} · 로봇연계 {{ m.avg_total_robot_min | num(1, '분') }} · n={{ m.time_n }}</div>
+  </div>
+  <div class="card">
+    <div class="k">픽업 → 완료 평균</div>
+    <div class="v">{{ m.avg_pickup_min | num(1) }}<small>분</small></div>
+    <div class="delta">{{ cfg.baseline.label }} {{ cfg.baseline.pickup_min }}분 대비
+      {% if m.delta_pickup_min is not none %}{{ '%+.1f' | format(m.delta_pickup_min) }}분{% else %}-{% endif %}</div>
+    <div class="sub">로봇연계는 적재함 대기·로봇 주행 포함{% if m.time_excluded_n %} · 완료(오류) {{ m.time_excluded_n }}건은 시간 평균에서 제외{% endif %}</div>
+  </div>
+</div>
+
+<div class="group-title">로봇 수행 품질</div>
+<div class="cards">
+  <div class="card">
+    <div class="k">로봇 적시 배송률 <span class="badge">적재함닫힘 → 완료 {{ cfg.timely_threshold_sec // 60 }}분 이내</span></div>
+    <div class="v">{{ m.timely_pct | num(1) }}<small>%</small></div>
+    <div class="sub">{{ m.timely_n }} / {{ m.timely_base }}건 · 목표 {{ cfg.targets.timely_pct }}% 이상</div>
+    {% if m.timely_pct is not none %}
+    <div class="target"><i style="width: {{ m.timely_pct }}%"></i><u style="left: {{ cfg.targets.timely_pct }}%"></u></div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="k">로봇 배송 성공률 <span class="badge warn">정의 확정 전</span></div>
+    <div class="v">{{ m.success_pct | num(1) }}<small>%</small></div>
+    <div class="sub">{{ m.success_n }} / {{ m.success_base }}건 (수기 입력한 결과 구분 기준 잠정값) · 목표 {{ cfg.targets.success_pct }}% 이상</div>
+    {% if m.success_pct is not none %}
+    <div class="target"><i style="width: {{ m.success_pct }}%"></i><u style="left: {{ cfg.targets.success_pct }}%"></u></div>
+    {% endif %}
+    {% if m.fail_n %}<div class="sub">실패로 기록된 건 {{ m.fail_n }}건</div>{% endif %}
+  </div>
+</div>
+{% if p.grain != 'day' %}
+<div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>일자</th><th>완료</th><th>일반</th><th>로봇연계</th><th>로봇 이용률</th>
+    <th>접수→완료(분)</th><th>픽업→완료(분)</th><th>적시 배송률</th><th>배송 성공률</th><th>제외</th>
+  </tr></thead>
+  <tbody>
+  {% for r in day_rows %}{% set x = r.m %}
+  <tr>
+    <td>{{ r.date.strftime('%m/%d') }} ({{ '월화수목금토일'[r.date.weekday()] }})</td>
+    <td>{{ x.completed }}</td><td>{{ x.general_done }}</td><td>{{ x.robot_done }}</td>
+    <td>{{ x.usage_pct | num(1, '%') }}</td>
+    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
+    <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
+    <td>{{ x.excluded_n or '' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="10" class="empty">데이터 없음</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if dd and m.completed %}
+<div class="group-title">일 상세 · 시간 분포 {% if dd.time_n < 10 %}<span style="font-weight:400;color:var(--muted)">(표본 {{ dd.time_n }}건 · P90은 참고용)</span>{% endif %}</div>
+<div class="cards">
+  <div class="card">
+    <div class="k">피크 시간대</div>
+    <div class="v">{% if dd.peak_hour is not none %}{{ '%02d' % dd.peak_hour }}<small>시</small>{% else %}-{% endif %}</div>
+    <div class="sub">{{ dd.peak_n if dd.peak_n is not none else '-' }}건 접수 (하루 {{ m.completed }}건 중)</div>
+  </div>
+  <div class="card">
+    <div class="k">P90 배송시간 <span class="badge">접수 → 완료</span></div>
+    <div class="v">{{ dd.p90_min | num(1) }}<small>분</small></div>
+    <div class="sub">최소 {{ dd.min_min | num(1, '분') }} · 최대 {{ dd.max_min | num(1, '분') }} · n={{ dd.time_n }}</div>
+  </div>
+  <div class="card">
+    <div class="k">지연 건수 <span class="badge">{{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분 초과</span></div>
+    <div class="v">{{ dd.delay_n }}<small>건</small></div>
+    <div class="sub">전체 {{ dd.time_n }}건 중 {{ dd.delay_pct | num(1, '%') }}</div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-card wide">
+    <h3>시간대별 완료 건수 · 평균 접수→완료 (분)</h3>
+    <p class="d">{{ p.start }} · 막대: 건수(접수 시각 기준), 선: 평균 배송시간</p>
+    <canvas id="hourChart"></canvas>
+  </div>
+</div>
+
+<div class="group-title">로봇 적시 미달 건 <span style="font-weight:400;color:var(--muted)">적재함닫힘 → 완료 {{ cfg.timely_threshold_sec // 60 }}분 초과</span></div>
+{% if dd.late_robots %}
+<div class="tablewrap">
+<table class="list">
+  <thead><tr><th>접수</th><th>로봇</th><th>상점</th><th>적재함닫힘→완료(분)</th><th>접수→완료(분)</th><th>비고</th></tr></thead>
+  <tbody>
+  {% for r in dd.late_robots %}
+  <tr>
+    <td>{{ r.ord_dt | dt }}</td><td>{{ r.robot_name or '-' }}</td><td>{{ r.store_name or '-' }}</td>
+    <td class="late">{{ r.hand_min | num(1) }}</td><td>{{ r.total_min | num(1) }}</td><td>{{ r.note }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<div class="card empty">적시 미달 건이 없습니다.</div>{% endif %}
+{% endif %}
+
+<div class="group-title">구간별 · 추이</div>
+<div class="charts">
+  <div class="chart-card wide">
+    <h3>구간 분해: 로봇연계 vs 일반 평균 (분)</h3>
+    <p class="d">로봇연계는 라이더 픽업 후 적재함 대기 구간이 포함됩니다. 일반 건은 도킹·로봇 구간이 없습니다.</p>
+    <canvas id="segChart"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>일별 완료 건수</h3>
+    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }}</p>
+    <canvas id="dailyChart"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>주별 평균 접수→완료 (분)</h3>
+    <p class="d">최근 12주 · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>
+    <canvas id="weekChart"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>로봇 이용률 (%)</h3>
+    <p class="d">주별 · 로봇연계 ÷ 로드샵 전체 완료</p>
+    <canvas id="usageChart"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>시간대별 완료 건수</h3>
+    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }} · 접수 시각 기준</p>
+    {% if heat.hours %}
+    <div class="heat-wrap">
+    <table class="heat">
+      <tr><th></th>{% for d in heat.days %}<th>{{ d }}</th>{% endfor %}</tr>
+      {% for h in heat.hours %}
+      {% set row = heat.cells[loop.index0] %}
+      <tr><th>{{ '%02d' % h }}시</th>
+        {% for c in row %}
+        <td title="{{ heat.days[loop.index0] }} {{ '%02d' % h }}시: {{ c }}건"
+            style="background: {% if c %}rgba(var(--heat), {{ (0.15 + 0.85 * c / heat.max) | round(2) }}){% else %}transparent{% endif %}">{{ c if c else '' }}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </table>
+    </div>
+    {% else %}<div class="empty">데이터 없음</div>{% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/chart.umd.min.js"></script>
+<script>
+(function () {
+  var D = {{ {'seg_robot': metrics.seg_robot, 'seg_general': metrics.seg_general, 'daily': daily, 'weekly': weekly,
+              'baseline': cfg.baseline.total_min, 'hourly': dd.hourly if dd else None} | tojson }};
+  var cs = getComputedStyle(document.documentElement);
+  var v = function (n) { return cs.getPropertyValue(n).trim(); };
+  var ink = v('--text-2'), grid = v('--grid'), surface = v('--surface');
+  var robot = v('--s1'), general = v('--s2');
+  Chart.defaults.color = ink;
+  Chart.defaults.font.family = '"Pretendard","Malgun Gothic",system-ui,sans-serif';
+  Chart.defaults.borderColor = grid;
+  Chart.defaults.plugins.legend.position = 'bottom';
+  Chart.defaults.plugins.legend.labels.boxWidth = 10;
+  Chart.defaults.plugins.legend.labels.boxHeight = 10;
+  var baseOpt = { responsive: true, maintainAspectRatio: true, interaction: { mode: 'index', intersect: false } };
+
+  // 1) 구간 분해 스택바
+  var segKeys = ['접수→배차', '배차→픽업완료', '픽업완료→적재함닫힘', '적재함닫힘→로봇배송완료', '픽업→완료'];
+  var segCols = [v('--s3'), v('--s4'), v('--s5'), v('--s6'), v('--s7')];
+  new Chart(document.getElementById('segChart'), {
+    type: 'bar',
+    data: { labels: ['로봇연계', '일반'],
+      datasets: segKeys.map(function (k, i) {
+        return { label: k, data: [D.seg_robot[k], D.seg_general[k]], backgroundColor: segCols[i],
+                 borderColor: surface, borderWidth: 2, borderRadius: 3, stack: 's' };
+      }) },
+    options: Object.assign({}, baseOpt, { indexAxis: 'y', aspectRatio: 4,
+      scales: { x: { stacked: true, title: { display: true, text: '분' } }, y: { stacked: true, grid: { display: false } } },
+      plugins: { tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + (c.raw == null ? '-' : c.raw + '분'); } } } } })
+  });
+
+  // 2) 일별 완료 건수 (로봇연계 분리 스택)
+  new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: { labels: D.daily.labels, datasets: [
+      { label: '일반', data: D.daily.general, backgroundColor: general, borderColor: surface, borderWidth: 2, borderRadius: 3, stack: 'a' },
+      { label: '로봇연계', data: D.daily.robot, backgroundColor: robot, borderColor: surface, borderWidth: 2, borderRadius: 3, stack: 'a' } ] },
+    options: Object.assign({}, baseOpt, { scales: { x: { stacked: true, grid: { display: false } },
+      y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } } })
+  });
+
+  // 2-1) 시간대별 건수(스택) + 평균 배송시간(선, 우측 축)
+  var hc = document.getElementById('hourChart');
+  if (hc && D.hourly) {
+    new Chart(hc, {
+      data: { labels: D.hourly.hours, datasets: [
+        { type: 'bar', label: '일반', data: D.hourly.general, backgroundColor: general, borderColor: surface, borderWidth: 2, borderRadius: 3, stack: 'a', yAxisID: 'y' },
+        { type: 'bar', label: '로봇연계', data: D.hourly.robot, backgroundColor: robot, borderColor: surface, borderWidth: 2, borderRadius: 3, stack: 'a', yAxisID: 'y' },
+        { type: 'line', label: '평균 접수→완료(분)', data: D.hourly.avg_min, borderColor: ink, backgroundColor: ink, borderWidth: 2, pointRadius: 4, pointBorderColor: surface, spanGaps: true, tension: 0, yAxisID: 'y1' } ] },
+      options: Object.assign({}, baseOpt, { aspectRatio: 3.5, scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '건' } },
+        y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: { display: true, text: '분' } } } })
+    });
+  }
+
+  // 3) 주별 평균 배송시간
+  var baseLine = D.weekly.labels.map(function () { return D.baseline; });
+  new Chart(document.getElementById('weekChart'), {
+    type: 'line',
+    data: { labels: D.weekly.labels, datasets: [
+      { label: '로봇연계', data: D.weekly.robot_min, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '일반', data: D.weekly.general_min, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: 4, pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: 'baseline', data: baseLine, borderColor: ink, borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0 } ] },
+    options: Object.assign({}, baseOpt, { scales: { y: { title: { display: true, text: '분' } }, x: { grid: { display: false } } } })
+  });
+
+  // 4) 로봇 이용률 추이
+  new Chart(document.getElementById('usageChart'), {
+    type: 'line',
+    data: { labels: D.weekly.labels, datasets: [
+      { label: '로봇 이용률(%)', data: D.weekly.usage_pct, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 } ] },
+    options: Object.assign({}, baseOpt, { plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, title: { display: true, text: '%' } }, x: { grid: { display: false } } } })
+  });
+  window.addEventListener('themechange', function () { location.reload(); });
+})();
+</script>
+{% endblock %}

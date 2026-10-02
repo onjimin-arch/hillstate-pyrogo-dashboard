@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+sqlalchemy>=2.0
+psycopg2-binary
+sqlglot
+jinja2
+python-multipart
+pandas
+openpyxl
+requests
+python-dotenv
+pyyaml
+pytest
+httpx

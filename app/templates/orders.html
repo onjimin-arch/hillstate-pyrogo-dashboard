@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+{% set qs = 'grain=' ~ p.grain ~ ('&d=' ~ p.start if p.grain != 'custom' else '&start=' ~ p.start ~ '&end=' ~ p.end) %}
+<p class="help">
+  이 단지의 <b>모든 주문</b>(로드샵·B2B, 완료·취소 포함)을 모아 봅니다. 로봇으로 처리했어야 했는데 놓친 주문을 찾고 사유를 남기는 용도입니다.
+  <b>로봇 누락 후보</b> = 로봇을 타지 않은 로드샵 완료 건입니다.
+  사유 구분(시스템 오류·테스트 주문 등)과 특이사항은 입력칸을 벗어날 때 저장됩니다.
+  <b>테스트 주문</b> 등 실적이 아닌 건은 <b>집계 제외</b>를 체크하세요(완료 건수·평균 시간 등 모든 집계에서 빠집니다).
+  <label style="margin-left:8px">입력자 <input type="text" id="editor" placeholder="이름" size="8"></label>
+</p>
+<div class="controls">
+  <div class="filters">
+    <a class="{{ 'on' if not flt }}" href="/orders?{{ qs }}{{ extra_qs }}">전체 {{ counts.all }}</a>
+    <a class="{{ 'on' if flt == 'miss' }}" href="/orders?{{ qs }}&flt=miss{{ extra_qs }}">로봇 누락 후보 {{ counts.miss }}</a>
+    <a class="{{ 'on' if flt == 'robot' }}" href="/orders?{{ qs }}&flt=robot{{ extra_qs }}">로봇연계 {{ counts.robot }}</a>
+    <a class="{{ 'on' if flt == 'noted' }}" href="/orders?{{ qs }}&flt=noted{{ extra_qs }}">사유·특이사항 {{ counts.noted }}</a>
+    <a class="{{ 'on' if flt == 'excluded' }}" href="/orders?{{ qs }}&flt=excluded{{ extra_qs }}">집계 제외 {{ counts.excluded }}</a>
+  </div>
+  <div class="filters">
+    {% set fq = ('&flt=' ~ flt) if flt else '' %}{% set qq = ('&q=' ~ q | urlencode) if q else '' %}
+    <a class="{{ 'on' if not st }}" href="/orders?{{ qs }}{{ fq }}{{ qq }}">모든 상점</a>
+    <a class="{{ 'on' if st == 'loadshop' }}" href="/orders?{{ qs }}{{ fq }}&st=loadshop{{ qq }}">로드샵</a>
+    <a class="{{ 'on' if st == 'b2b' }}" href="/orders?{{ qs }}{{ fq }}&st=b2b{{ qq }}">B2B</a>
+  </div>
+  <form method="get" action="/orders" class="range">
+    <input type="hidden" name="grain" value="{{ p.grain }}">
+    {% if p.grain == 'custom' %}<input type="hidden" name="start" value="{{ p.start }}"><input type="hidden" name="end" value="{{ p.end }}">
+    {% else %}<input type="hidden" name="d" value="{{ p.start }}">{% endif %}
+    {% if flt %}<input type="hidden" name="flt" value="{{ flt }}">{% endif %}
+    {% if st %}<input type="hidden" name="st" value="{{ st }}">{% endif %}
+    <input type="text" name="q" value="{{ q }}" placeholder="주문ID·상점·주문처 검색" size="22">
+    <button class="theme" type="submit">검색</button>
+  </form>
+  <span class="badge">{{ total }}건</span>
+</div>
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>접수</th><th>배송 유형</th><th>주문처 / 상점</th><th>상점구분</th><th>상태</th><th>접수→완료</th>
+    <th>배차횟수</th><th>사유 구분</th><th>특이사항</th><th>집계 제외</th><th>수정</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}{% include "_order_row.html" %}{% else %}
+  <tr><td colspan="11" class="empty">조건에 맞는 주문이 없습니다.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if pages > 1 %}
+<div class="pager" style="margin-top:12px">
+  {% set base_q = '/orders?' ~ qs ~ (('&flt=' ~ flt) if flt else '') ~ extra_qs %}
+  {% if page > 1 %}<a href="{{ base_q }}&page={{ page - 1 }}">◀</a>{% else %}<span class="dis">◀</span>{% endif %}
+  <span class="plabel">{{ page }} / {{ pages }} 페이지</span>
+  {% if page < pages %}<a href="{{ base_q }}&page={{ page + 1 }}">▶</a>{% else %}<span class="dis">▶</span>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  var ed = document.getElementById('editor');
+  try { ed.value = localStorage.getItem('editor') || ''; } catch (e) {}
+  ed.addEventListener('change', function () { try { localStorage.setItem('editor', ed.value); } catch (e) {} });
+  document.body.addEventListener('htmx:configRequest', function (ev) {
+    if (ed.value.trim()) ev.detail.headers['X-Editor'] = encodeURIComponent(ed.value.trim());
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수원 배송 KPI</title>
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<script src="/static/htmx.min.js"></script>
+</head>
+<body>
+{% set f = fresh %}
+{% if f.last_success is none %}
+  <div class="fresh err">데이터 기준: <b>수집 이력 없음</b> — <code>python scripts/collect.py</code> 실행 필요</div>
+{% else %}
+  {% set age = (today - f.last_success.date()).days %}
+  <div class="fresh {{ 'err' if f.last_failed else ('warn' if age >= 2 else '') }}">
+    데이터 기준: <b>{{ f.last_success.strftime('%Y-%m-%d') }} 수집 {{ f.last_success.strftime('%H:%M') }}</b>
+    {% if f.last_failed %} · 최근 수집 실패 — 마지막 성공 데이터를 표시 중{% elif age >= 2 %} · {{ age }}일 전 데이터입니다{% endif %}
+    · 일 단위는 전일(D-1)까지만 표시
+  </div>
+{% endif %}
+<div class="wrap">
+  <header class="top">
+    <h1>{{ cfg.building }} · 배송 KPI</h1>
+    <span class="badge">모수: {{ cfg.store_type }}</span>
+    <nav class="tabs">
+      <a href="/" class="{{ 'on' if active == 'dashboard' }}">대시보드</a>
+      <a href="/robots" class="{{ 'on' if active == 'robots' }}">로봇 배송 건</a>
+      <a href="/orders" class="{{ 'on' if active == 'orders' }}">전체 주문</a>
+      <a href="/ask" class="{{ 'on' if active == 'ask' }}">AI 질문</a>
+    </nav>
+    <button class="theme" type="button" onclick="toggleTheme()" aria-label="테마 전환">◐</button>
+  </header>
+
+  {% block controls %}
+  {% if active != 'ask' %}
+  {% set base = base_path or ('/' if active == 'dashboard' else '/robots') %}
+  {% set xq = extra_qs or '' %}
+  <div class="controls">
+    <div class="seg">
+      {% for g, name in grains %}
+        <a class="{{ 'on' if p.grain == g }}" href="{{ base }}?grain={{ g }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">{{ name }}</a>
+      {% endfor %}
+    </div>
+    {% if p.grain != 'custom' %}
+    <div class="pager">
+      <a href="{{ base }}?grain={{ p.grain }}&d={{ p.prev }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">◀</a>
+      <span class="plabel">{{ p.label }}</span>
+      <a href="{{ base }}?grain={{ p.grain }}&d={{ p.next }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">▶</a>
+    </div>
+    {% else %}
+    <form class="range" method="get" action="{{ base }}">
+      <input type="hidden" name="grain" value="custom">
+      {% if flt %}<input type="hidden" name="flt" value="{{ flt }}">{% endif %}
+      <input type="date" name="start" value="{{ p.start }}"> ~ <input type="date" name="end" value="{{ p.end }}">
+      <button class="theme" type="submit">조회</button>
+    </form>
+    {% endif %}
+    {% if p.in_progress %}<span class="badge warn">진행 중 (경과 {{ p.elapsed_days }}일)</span>{% endif %}
+  </div>
+  {% endif %}
+  {% endblock %}
+
+  {% block content %}{% endblock %}
+</div>
+<script>
+  function toggleTheme() {
+    var cur = document.documentElement.dataset.theme ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    var next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    window.dispatchEvent(new Event("themechange"));
+  }
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
