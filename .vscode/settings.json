@@ -1,0 +1,44 @@
+{
+  // 가상환경: 레포 루트의 .venv 를 쓴다 (없으면 README 의 설치 절차 참고)
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+
+  // 테스트: 사이드바 플라스크 아이콘에서 바로 실행된다
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": ["tests"],
+
+  // 한글 주석·로그가 깨지지 않게. Windows 기본 cp949 로 두면
+  // 로그에 em dash 같은 문자가 섞일 때 UnicodeEncodeError 로 죽는다.
+  "files.encoding": "utf8",
+  "terminal.integrated.env.windows": {
+    "PYTHONUTF8": "1",
+    "PYTHONIOENCODING": "utf-8"
+  },
+
+  // 기존 코드 스타일에 맞춤 (100컬럼 근처에서 줄바꿈)
+  "[python]": {
+    "editor.rulers": [100],
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true
+  },
+  "[html]": {
+    "editor.tabSize": 2
+  },
+
+  // Jinja 템플릿을 HTML 로 인식시켜 하이라이팅·자동완성이 되게 한다
+  "files.associations": {
+    "app/templates/*.html": "jinja-html"
+  },
+
+  // 탐색기에서 캐시 폴더 숨김 (삭제가 아니라 표시만 안 함)
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "app/static/*.min.js": true
+  }
+}

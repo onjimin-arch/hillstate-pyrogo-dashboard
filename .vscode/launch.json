@@ -1,0 +1,56 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // F5 로 디버거 붙여서 앱 실행. 중단점이 먹는다.
+      // .env 를 읽으므로 DATABASE_URL·AUTH_DISABLED 는 그 파일에서 가져온다.
+      "name": "대시보드 실행 (디버그)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.main:app",
+        "--host", "127.0.0.1",
+        "--port", "8080",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": { "PYTHONUTF8": "1" },
+      "jinja": true,
+      "justMyCode": false,
+      "consoleTitle": "KPI 대시보드"
+    },
+    {
+      // Redash 수집을 직접 돌려본다. .env 의 REDASH_* 가 채워져 있어야 동작.
+      // 주의: 운영 DB(DATABASE_URL)를 가리키고 있으면 실제 운영 데이터에 쓴다.
+      "name": "수집 1회 (최근 7일)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/collect.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": { "PYTHONUTF8": "1" },
+      "justMyCode": false
+    },
+    {
+      // Redash 없이 엑셀로 적재 (개발·검증용). 실행하면 파일 경로를 물어본다.
+      "name": "엑셀로 적재 (--xlsx)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/collect.py",
+      "args": ["--xlsx", "${input:xlsxPath}", "--full"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": { "PYTHONUTF8": "1" },
+      "justMyCode": false
+    }
+  ],
+  "inputs": [
+    {
+      "id": "xlsxPath",
+      "type": "promptString",
+      "description": "적재할 Redash 추출 xlsx 경로"
+    }
+  ]
+}
