@@ -138,6 +138,7 @@ def keep(rows: list[RawOrder], notes: dict) -> list[RawOrder]:
 
 def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     excluded_n = len(rows) - len(keep(rows, notes))
+    completed_all = len(rows)      # 집계제외까지 포함한 완료 건수(표의 "완료" 열). KPI 모수는 아니다.
     # 특이사항 집계는 제외 건까지 포함한 전체 기준 (기록된 건을 한눈에 보기 위함)
     ann = [notes[o.delivery_id] for o in rows if o.delivery_id in notes]
     ann = [n for n in ann if n.note or n.exclude_from_kpi or n.miss_reason
@@ -194,6 +195,7 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
 
     return {
         "completed": len(rows),
+        "completed_all": completed_all,
         "robot_done": len(robots_all),
         "general_done": len(general),
         "loadshop_done": len(loadshop_general),

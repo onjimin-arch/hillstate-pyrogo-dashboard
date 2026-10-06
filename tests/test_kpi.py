@@ -185,13 +185,23 @@ def test_migration_adds_miss_reason(tmp_path):
 
 
 def test_daily_table_splits_loadshop_b2b_robot(session):
-    """일자별 주요 항목의 완료 = 일반(로드샵) + B2B + 로봇연계 (B2B 가 총합에 포함된다)."""
-    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
-    notes = kpi.load_notes(session)
-    day_rows = kpi.daily_table(rows, notes, date(2026, 9, 30), date(2026, 9, 30))
-    m = day_rows[0]["m"]
+    """일자별 주요 항목의 완료 = 일반(로드샵) + B2B + 로봇연계 + 집계제외."""
+    def day_metrics():
+        rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+        day_rows = kpi.daily_table(rows, kpi.load_notes(session), date(2026, 9, 30), date(2026, 9, 30))
+        return day_rows[0]["m"]
+
+    m = day_metrics()
     assert (m["loadshop_done"], m["b2b_done"], m["robot_done"]) == (2, 1, 3)
-    assert m["completed"] == m["loadshop_done"] + m["b2b_done"] + m["robot_done"]
+    assert m["completed_all"] == 6 and m["excluded_n"] == 0
+
+    # 집계제외 건이 생겨도 "완료" 열에서는 빠지지 않는다 (KPI 모수 completed 에서만 빠진다)
+    session.add(dbm.RobotOrderNote(delivery_id="1", exclude_from_kpi=True))
+    session.commit()
+    m = day_metrics()
+    assert m["excluded_n"] == 1 and m["completed"] == 5 and m["completed_all"] == 6
+    assert m["completed_all"] == (m["loadshop_done"] + m["b2b_done"]
+                                 + m["robot_done"] + m["excluded_n"])
 
 
 def test_dashboard_renders_b2b_column(session):
