@@ -96,7 +96,7 @@
 </div>
 </div></div>
 {% endif %}
-{% if p.grain not in ('day', 'month', 'custom') %}
+{% if p.grain != 'day' %}
 {% if week_split %}<div class="col">{% endif %}
 <div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
 <div class="tablewrap">
