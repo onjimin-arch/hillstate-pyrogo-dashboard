@@ -330,6 +330,20 @@ def day_detail(rows, notes, day: date) -> dict:
     }
 
 
+def weekly_table(rows, notes, s: date, e: date) -> list[dict]:
+    """주간 누적 리스트 (월~일, 최신 주가 위). 기간 밖 날짜는 잘라낸다. 지표 정의는 카드와 동일."""
+    if e < s:
+        return []
+    out = []
+    ws = _monday(s)
+    while ws <= e:
+        a, b = max(ws, s), min(ws + timedelta(days=6), e)
+        wr = [o for o in rows if a <= o.ord_dt.date() <= b]
+        out.append({"start": a, "end": b, "m": compute_metrics(wr, notes)})
+        ws += timedelta(days=7)
+    return out[::-1]
+
+
 def dashboard(session, p: Period) -> dict:
     notes = load_notes(session)
     rows = scoped_done(session, p.start, p.eff_end)
@@ -350,6 +364,7 @@ def dashboard(session, p: Period) -> dict:
         "weekly": weekly_series(long_rows, notes, de),
         "heat": heatmap(trend_rows, ts, te),
         "day_rows": daily_table(trend_all, notes, ts, te),
+        "week_rows": weekly_table(trend_all, notes, ts, te) if p.grain in ("month", "custom") else [],
         "dd": day_detail(trend_all, notes, p.start) if p.grain == "day" else None,
         "trend_range": (ts, te),
     }

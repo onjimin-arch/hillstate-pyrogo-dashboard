@@ -9,7 +9,8 @@
 
 {% set day_split = p.grain == 'day' and dd and m.completed %}
 {% set week_split = p.grain == 'week' %}
-{% if day_split or week_split %}<div class="split"><div class="col">{% endif %}
+{% set agg_split = p.grain in ('month', 'custom') %}
+{% if day_split or week_split or agg_split %}<div class="split"><div class="col">{% endif %}
 <div class="group-title">완료 건수 · 로봇 이용</div>
 <div class="cards">
   <div class="card">
@@ -69,8 +70,33 @@
     {% if m.fail_n %}<div class="sub">실패로 기록된 건 {{ m.fail_n }}건</div>{% endif %}
   </div>
 </div>
-{% if day_split or week_split %}</div>{% endif %}
-{% if p.grain != 'day' %}
+{% if day_split or week_split or agg_split %}</div>{% endif %}
+{% if agg_split %}
+<div class="col">
+<div class="group-title">주간 누적<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>주간</th><th>완료</th><th>일반</th><th>로봇연계</th><th>로봇 이용률</th>
+    <th>접수→완료(분)</th><th>픽업→완료(분)</th><th>적시 배송률</th><th>배송 성공률</th><th>제외</th>
+  </tr></thead>
+  <tbody>
+  {% for r in week_rows %}{% set x = r.m %}
+  <tr>
+    <td>{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}</td>
+    <td>{{ x.completed }}</td><td>{{ x.general_done }}</td><td>{{ x.robot_done }}</td>
+    <td>{{ x.usage_pct | num(1, '%') }}</td>
+    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
+    <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
+    <td>{{ x.excluded_n or '' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="10" class="empty">데이터 없음</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+</div></div>
+{% endif %}
+{% if p.grain not in ('day', 'month', 'custom') %}
 {% if week_split %}<div class="col">{% endif %}
 <div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
 <div class="tablewrap">
