@@ -77,20 +77,20 @@
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
-    <th>주간</th><th>완료</th><th>일반</th><th>로봇연계</th><th>로봇 이용률</th>
-    <th>접수→완료(분)</th><th>픽업→완료(분)</th><th>적시 배송률</th><th>배송 성공률</th><th>제외</th>
+    <th>주간</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
+    <th>접수→완료(분)</th><th>픽업→완료(분)</th><th>적시 배송률</th><th>배송 성공률</th>
   </tr></thead>
   <tbody>
   {% for r in week_rows %}{% set x = r.m %}
   <tr>
     <td>{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}</td>
-    <td>{{ x.completed }}</td><td>{{ x.general_done }}</td><td>{{ x.robot_done }}</td>
+    <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
+    <td>{{ x.excluded_n or '' }}</td>
     <td>{{ x.usage_pct | num(1, '%') }}</td>
     <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
     <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
-    <td>{{ x.excluded_n or '' }}</td>
   </tr>
-  {% else %}<tr><td colspan="10" class="empty">데이터 없음</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="11" class="empty">데이터 없음</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
