@@ -182,3 +182,23 @@ def test_migration_adds_miss_reason(tmp_path):
     with SL() as s:
         n = s.get(dbm.RobotOrderNote, "9")
         assert n.note == "메모" and n.miss_reason is None
+
+
+def test_daily_table_splits_loadshop_b2b_robot(session):
+    """일자별 주요 항목의 완료 = 일반(로드샵) + B2B + 로봇연계 (B2B 가 총합에 포함된다)."""
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    notes = kpi.load_notes(session)
+    day_rows = kpi.daily_table(rows, notes, date(2026, 9, 30), date(2026, 9, 30))
+    m = day_rows[0]["m"]
+    assert (m["loadshop_done"], m["b2b_done"], m["robot_done"]) == (2, 1, 3)
+    assert m["completed"] == m["loadshop_done"] + m["b2b_done"] + m["robot_done"]
+
+
+def test_dashboard_renders_b2b_column(session):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    r = TestClient(app).get("/?grain=week&d=2026-09-30")   # 표는 grain != 'day' 에서만 렌더된다
+    assert r.status_code == 200
+    head = r.text[r.text.index("일자별 주요 항목"):]
+    assert "<th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th>" in head
