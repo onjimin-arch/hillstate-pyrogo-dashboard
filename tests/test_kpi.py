@@ -208,7 +208,15 @@ def test_dashboard_renders_b2b_column(session):
     from fastapi.testclient import TestClient
 
     from app.main import app
+    session.add(dbm.RobotOrderNote(delivery_id="1", exclude_from_kpi=True))
+    session.commit()
     r = TestClient(app).get("/?grain=week&d=2026-09-30")   # 표는 grain != 'day' 에서만 렌더된다
     assert r.status_code == 200
+    # 표: 합이 왼쪽에서 오른쪽으로 읽히도록 제외가 로봇연계 바로 뒤에 온다
     head = r.text[r.text.index("일자별 주요 항목"):]
-    assert "<th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th>" in head
+    assert "<th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th>" in head
+    # 카드: 전체 완료 건수도 제외를 포함해 표와 숫자가 통일된다
+    # 제외한 "1" 은 로드샵 건이라 로드샵에서 빠져 제외로 옮겨간다 (6 = 1+1+3+1)
+    card = r.text[r.text.index("전체 완료 건수"):r.text.index("로봇 완료 건수")]
+    assert "6<small>건</small>" in card
+    assert "로드샵 1 · B2B 1 · 로봇연계 3 · 제외 1" in card
