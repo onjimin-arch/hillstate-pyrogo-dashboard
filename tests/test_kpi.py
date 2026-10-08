@@ -220,3 +220,64 @@ def test_dashboard_renders_b2b_column(session):
     card = r.text[r.text.index("전체 완료 건수"):r.text.index("로봇 완료 건수")]
     assert "6<small>건</small>" in card
     assert "로드샵 1 · B2B 1 · 로봇연계 3 · 제외 1" in card
+
+
+def _consent_order(i, store_id, consent, store_type=None, hour=12):
+    o = make_order(i, store_type=store_type, hour=hour)
+    o.store_id, o.store_robot_consent = store_id, consent
+    return o
+
+
+def test_consent_stats_by_shop_loadshop_only():
+    rows = [
+        _consent_order(1, "S1", "동의"), _consent_order(2, "S1", "동의"),     # 같은 상점 2건
+        _consent_order(3, "S2", "미동의"), _consent_order(4, "S3", "미응답"),
+        _consent_order(5, "0", "미응답"),                                     # 상점 정보 없음: 상점 수에서 제외
+        _consent_order(6, "S9", "동의", store_type="B2B"),                    # B2B 는 로드샵 기준에서 제외
+    ]
+    c = kpi.consent_stats(rows)
+    assert (c["consent_shops"], c["noconsent_shops"], c["noresp_shops"]) == (1, 1, 1)
+    assert c["consent_shop_base"] == 3 and c["consent_shop_pct"] == 33.3
+    assert (c["consent_order_n"], c["consent_order_base"]) == (2, 5)         # 주문 기준엔 store_id '0' 포함
+
+
+def test_consent_stats_none_when_not_collected():
+    """컬럼 추가 전 수집분(NULL)뿐이면 0% 가 아니라 None(화면에서 '-')."""
+    c = kpi.consent_stats([make_order(1), make_order(2)])
+    assert c["consent_shop_pct"] is None and c["consent_order_pct"] is None
+
+
+def test_consent_in_metrics_and_order_row(session):
+    o = session.get(dbm.RawOrder, "1")
+    o.store_id, o.store_robot_consent = "S1", "동의"
+    session.commit()
+    p = kpi.resolve_period("custom", None, date(2026, 9, 30), date(2026, 9, 30), today=date(2026, 10, 2))
+    assert kpi.dashboard(session, p)["metrics"]["consent_shops"] == 1
+    assert kpi.order_row_view(o, None)["consent"] == "동의"
+
+
+def test_daily_average_uses_elapsed_days(session):
+    """일평균 = 건수 ÷ 경과일수(D-1 까지). 진행 중인 주도 지난 날짜만큼으로 나눈다."""
+    p = kpi.resolve_period("custom", None, date(2026, 9, 28), date(2026, 10, 4), today=date(2026, 10, 1))
+    assert p.elapsed_days == 3                                # 9/28~9/30
+    m = kpi.dashboard(session, p)["metrics"]
+    assert m["avg_days"] == 3
+    assert m["avg_completed"] == round(m["completed_all"] / 3, 1)
+    assert m["avg_robot"] == round(m["robot_done"] / 3, 1)
+
+
+def test_daily_average_none_before_any_day_elapsed(session):
+    p = kpi.resolve_period("week", date(2026, 10, 5), None, None, today=date(2026, 10, 5))   # 월요일 당일: 경과 0일
+    m = kpi.dashboard(session, p)["metrics"]
+    assert m["avg_days"] == 0 and m["avg_completed"] is None and m["avg_robot"] is None
+
+
+def test_robot_only_pickup_average(session):
+    """표의 로봇 기준 평균. 전체(일반+로봇)와 달리 로봇연계 건만 평균낸다. 시간 오류 건은 제외."""
+    rows = [make_order(10, robot=True, hand=300, total=1000), make_order(11, robot=True, hand=300, total=2000),
+            make_order(12, total=600)]
+    m = kpi.compute_metrics(rows, {})
+    assert m["avg_total_robot_min"] == round((1000 + 2000) / 2 / 60, 1)
+    assert m["avg_pickup_robot_min"] == round(((1000 - 500) + (2000 - 1000)) / 2 / 60, 1)   # total - pickup(total/2)
+    assert m["avg_total_min"] != m["avg_total_robot_min"]                                     # 전체 기준은 별도 유지
+    assert kpi.compute_metrics([make_order(13)], {})["avg_pickup_robot_min"] is None         # 로봇 건 없으면 None

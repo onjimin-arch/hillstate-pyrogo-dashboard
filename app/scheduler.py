@@ -32,13 +32,13 @@ def _never_collected() -> bool:
                         .where(CollectLog.status == "success")) == 0
 
 
-def collect_once() -> bool:
-    """수집 1회. 이미 돌고 있으면 False."""
+def collect_once(force_full: bool = False) -> bool:
+    """수집 1회. 이미 돌고 있으면 False. force_full=True 면 전체 백필(raw_orders 만 갱신)."""
     if not _run_lock.acquire(blocking=False):
         return False
     STATE.update(running=True, last_start=datetime.now().isoformat(timespec="seconds"), last_error=None)
     try:
-        full = _never_collected()
+        full = force_full or _never_collected()
         log.info("수집 시작 full=%s", full)
         n = run_collect(full=full)
         log.info("수집 완료 %s건", n)
@@ -54,11 +54,11 @@ def collect_once() -> bool:
     return True
 
 
-def trigger() -> bool:
+def trigger(full: bool = False) -> bool:
     """수동 수집을 백그라운드로 시작. 이미 진행 중이면 False."""
     if _run_lock.locked():
         return False
-    threading.Thread(target=collect_once, name="manual-collect", daemon=True).start()
+    threading.Thread(target=collect_once, args=(full,), name="manual-collect", daemon=True).start()
     return True
 
 

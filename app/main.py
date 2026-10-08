@@ -280,12 +280,12 @@ def collect_status(db=Depends(get_db), _=Depends(require_import_admin)):
 
 
 @app.post("/admin/collect", status_code=202)
-def collect_now(request: Request, user=Depends(require_import_admin)):
+def collect_now(request: Request, full: bool = False, user=Depends(require_import_admin)):
     if "x-requested-with" not in request.headers:     # 커스텀 헤더 필수(CSRF 방지)
         raise HTTPException(400, "잘못된 요청")
-    if not scheduler.trigger():
+    if not scheduler.trigger(full=full):
         raise HTTPException(409, "이미 수집이 진행 중입니다")
-    log.info("manual collect by=%s", user)
+    log.info("manual collect by=%s full=%s", user, full)
     return {"status": "running"}
 
 

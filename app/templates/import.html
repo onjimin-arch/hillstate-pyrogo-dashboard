@@ -6,7 +6,8 @@
 </p>
 <div class="card" style="margin-bottom:12px">
   <div class="k"><b>Redash 수집 상태</b><span id="c-state" class="badge"></span>
-    <button type="button" id="c-go" class="imp-btn">지금 수집</button></div>
+    <button type="button" id="c-go" class="imp-btn">지금 수집</button>
+    <button type="button" id="c-full" class="imp-btn" title="2025-01-01부터 월 단위로 전체 재수집합니다. 수집 전용 테이블만 갱신되고 수기 입력은 유지됩니다.">전체 재수집(백필)</button></div>
   <div class="sub" id="c-info"></div>
   <div id="c-err" class="badge err" hidden></div>
   <table class="imp-tbl tbl-l"><thead><tr><th>시각</th><th>결과</th><th>건수</th><th>메시지</th></tr></thead>
@@ -108,6 +109,12 @@
   }
   $('c-go').addEventListener('click', function () {
     fetch('/admin/collect', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { setMsg('수집 시작 실패: ' + (d.detail || r.status)); });
+    }).then(cPoll);
+  });
+  $('c-full').addEventListener('click', function () {
+    if (!confirm('2025-01-01부터 전체 재수집합니다. 수집 전용 테이블만 갱신되고 수기 입력은 유지됩니다. 몇 분 걸릴 수 있습니다. 진행할까요?')) return;
+    fetch('/admin/collect?full=true', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
       if (!r.ok) return r.json().then(function (d) { setMsg('수집 시작 실패: ' + (d.detail || r.status)); });
     }).then(cPoll);
   });

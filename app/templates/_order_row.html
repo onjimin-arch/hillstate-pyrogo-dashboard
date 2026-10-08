@@ -6,6 +6,7 @@
     {% if r.robot_name %}<div class="mut">{{ r.robot_name }}</div>{% endif %}</td>
   <td>{{ r.order_source or '-' }}<div class="mut">{{ r.store_name or '' }}</div></td>
   <td>{{ r.store_type or '-' }}{% if not r.in_scope %}<div class="mut">집계 모수 아님</div>{% endif %}</td>
+  <td>{% if r.consent == '동의' %}<span class="badge">동의</span>{% elif r.consent %}<span class="badge warn">{{ r.consent }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
   <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
   <td>{{ r.total_min | num(1) }}분</td>
   <td>{{ r.dispatch_count if r.dispatch_count is not none else '-' }}</td>

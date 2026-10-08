@@ -46,7 +46,7 @@ def ensure_views(session) -> None:
         CREATE VIEW ai_orders AS SELECT
           o.delivery_id, order_id, robot_delivery_id,
           {ord_date} AS ord_date, ord_dt, {ord_hour} AS ord_hour,
-          building, delivery_type, store_type, robot_matched, robot_name, store_name, order_source,
+          building, delivery_type, store_type, robot_matched, robot_name, store_name, store_id, store_robot_consent, order_source,
           dispatch_count, order_status, delivery_status,
           dispatch_dt, pickup_dt, dock_close_dt, robot_finish_dt, finish_dt,
           s_order_dispatch, s_dispatch_pickup, s_order_pickup, s_pickup_dockclose,
@@ -223,7 +223,7 @@ DB에 수집된 주문 데이터의 범위는 접수일 기준 {cover}이다.
 
 ## query_sql 용 뷰 (PostgreSQL)
 ai_orders(주문 1건 1행): delivery_id, order_id, robot_delivery_id, ord_date(YYYY-MM-DD), ord_dt, ord_hour(0-23),
-  building, delivery_type('일반'|'로봇연계'), store_type('일반(로드샵)'|'B2B'), robot_matched, robot_name, store_name, order_source,
+  building, delivery_type('일반'|'로봇연계'), store_type('일반(로드샵)'|'B2B'), robot_matched, robot_name, store_name, store_id, store_robot_consent('동의'|'미동의'|'미응답'|NULL=수집 전), order_source,
   dispatch_count, order_status, delivery_status, dispatch_dt, pickup_dt, dock_close_dt, robot_finish_dt, finish_dt,
   s_order_dispatch, s_dispatch_pickup, s_order_pickup, s_pickup_dockclose, s_dockclose_robotfinish, s_order_finish (모두 초),
   miss_reason(일반 주문의 로봇 누락 사유: '시스템 오류(로봇 매칭 실패)'|'테스트 주문'|'로봇 운영 외(점검·미운영)'|'상점 미동의'|'기타'|NULL), result_type(로봇연계 건의 결과 구분: NULL 또는 '정상'=정상(완료) | '완료(오류)' | '실패' | '기타'), note(특이사항), exclude_from_kpi(1=집계 제외; 사용자 입력, 로봇연계 건만 값 존재),
