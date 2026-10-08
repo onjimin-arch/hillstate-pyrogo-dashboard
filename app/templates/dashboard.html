@@ -17,11 +17,13 @@
     <div class="k">전체 완료 건수</div>
     <div class="v">{{ m.completed_all }}<small>건</small></div>
     <div class="sub">로드샵 {{ m.loadshop_done }} · B2B {{ m.b2b_done }} · 로봇연계 {{ m.robot_done }}{% if m.excluded_n %} · 제외 {{ m.excluded_n }}{% endif %}</div>
+    {% if p.grain != 'day' and m.avg_completed is not none %}<div class="sub">일평균 <b>{{ m.avg_completed | num(1) }}건</b> (경과 {{ m.avg_days }}일 기준)</div>{% endif %}
   </div>
   <div class="card">
     <div class="k">로봇 완료 건수</div>
     <div class="v">{{ m.robot_done }}<small>건</small></div>
     <div class="sub">로봇 이용률 {{ m.usage_pct | num(1, '%') }} (로봇연계 ÷ 집계 대상 {{ m.completed }}건)</div>
+    {% if p.grain != 'day' and m.avg_robot is not none %}<div class="sub">일평균 <b>{{ m.avg_robot | num(1) }}건</b> (경과 {{ m.avg_days }}일 기준)</div>{% endif %}
   </div>
   <div class="card">
     <div class="k">특이사항 · 집계 제외 <a href="/robots?grain={{ p.grain }}&d={{ p.start }}{% if p.grain == 'custom' %}&start={{ p.start }}&end={{ p.end }}{% endif %}&flt=noted" style="margin-left:auto;font-size:12px">목록 보기 ›</a></div>
@@ -29,6 +31,12 @@
     <div class="sub">특이사항 기록 {{ m.annotated_n }}건 (비고 입력 {{ m.noted_n }}건)</div>
     <div class="sub">완료(오류) {{ m.err_n }}건(시간만 제외) · 실패 {{ m.fail_n }}건 · 기타 {{ m.other_n }}건</div>
     <div class="sub">로봇 누락 사유 기록 {{ m.miss_n }}건</div>
+  </div>
+  <div class="card">
+    <div class="k">상점 로봇배송 동의 <span class="badge">로드샵 기준</span></div>
+    <div class="v">{{ m.consent_shop_pct | num(1) }}<small>%</small></div>
+    <div class="sub">동의 {{ m.consent_shops }} · 미동의 {{ m.noconsent_shops }} · 미응답 {{ m.noresp_shops }} / 상점 {{ m.consent_shop_base }}곳</div>
+    <div class="sub">동의 상점 주문 {{ m.consent_order_n }} / {{ m.consent_order_base }}건 ({{ m.consent_order_pct | num(1, '%') }})</div>
   </div>
 </div>
 
@@ -78,7 +86,7 @@
 <table class="list">
   <thead><tr>
     <th>주간</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
-    <th>접수→완료(분)</th><th>픽업→완료(분)</th><th>적시 배송률</th><th>배송 성공률</th>
+    <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
   </tr></thead>
   <tbody>
   {% for r in week_rows %}{% set x = r.m %}
@@ -87,10 +95,11 @@
     <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
     <td>{{ x.excluded_n or '' }}</td>
     <td>{{ x.usage_pct | num(1, '%') }}</td>
-    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
+    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_total_robot_min | num(1) }}</td>
+    <td>{{ x.avg_pickup_min | num(1) }}</td><td>{{ x.avg_pickup_robot_min | num(1) }}</td>
     <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
   </tr>
-  {% else %}<tr><td colspan="11" class="empty">데이터 없음</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="13" class="empty">데이터 없음</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
@@ -103,7 +112,7 @@
 <table class="list">
   <thead><tr>
     <th>일자</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
-    <th>접수→완료(분)</th><th>픽업→완료(분)</th><th>적시 배송률</th><th>배송 성공률</th>
+    <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
   </tr></thead>
   <tbody>
   {% for r in day_rows %}{% set x = r.m %}
@@ -112,10 +121,11 @@
     <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
     <td>{{ x.excluded_n or '' }}</td>
     <td>{{ x.usage_pct | num(1, '%') }}</td>
-    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
+    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_total_robot_min | num(1) }}</td>
+    <td>{{ x.avg_pickup_min | num(1) }}</td><td>{{ x.avg_pickup_robot_min | num(1) }}</td>
     <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
   </tr>
-  {% else %}<tr><td colspan="11" class="empty">데이터 없음</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="13" class="empty">데이터 없음</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>

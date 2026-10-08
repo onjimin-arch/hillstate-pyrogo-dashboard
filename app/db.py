@@ -12,6 +12,7 @@ STR_COLS = {
     "로봇매칭여부": "robot_matched", "로봇명": "robot_name", "상점명": "store_name",
     "주문처": "order_source", "라이더ID": "rider_id", "주문상태": "order_status",
     "배달상태": "delivery_status",
+    "상점ID": "store_id", "상점로봇동의상태": "store_robot_consent",   # 동의/미동의/미응답 (Redash 쿼리에서 산출)
 }
 DT_COLS = {
     "상점주문접수일시": "ord_dt", "라이더배차일시": "dispatch_dt",
@@ -43,6 +44,8 @@ class RawOrder(Base):
     robot_matched: Mapped[str | None] = mapped_column(String)
     robot_name: Mapped[str | None] = mapped_column(String)
     store_name: Mapped[str | None] = mapped_column(String)
+    store_id: Mapped[str | None] = mapped_column(String)
+    store_robot_consent: Mapped[str | None] = mapped_column(String)   # 동의/미동의/미응답 (NULL=컬럼 추가 전 수집분)
     order_source: Mapped[str | None] = mapped_column(String)
     rider_id: Mapped[str | None] = mapped_column(String)
     order_status: Mapped[str | None] = mapped_column(String)
@@ -98,10 +101,16 @@ class CollectLog(Base):
 def _migrate(engine) -> None:
     """기존 DB에 신규 컬럼 추가 (사용자 입력 데이터 보존)."""
     from sqlalchemy import inspect, text
-    cols = {c["name"] for c in inspect(engine).get_columns("robot_order_notes")}
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("robot_order_notes")}
     if "miss_reason" not in cols:
         with engine.begin() as c:
             c.execute(text("ALTER TABLE robot_order_notes ADD COLUMN miss_reason VARCHAR"))
+    raw_cols = {c["name"] for c in insp.get_columns("raw_orders")}
+    for name in ("store_id", "store_robot_consent"):
+        if name not in raw_cols:
+            with engine.begin() as c:
+                c.execute(text(f"ALTER TABLE raw_orders ADD COLUMN {name} VARCHAR"))
 
 
 def database_url() -> str:

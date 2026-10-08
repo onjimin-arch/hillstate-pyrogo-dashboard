@@ -136,6 +136,29 @@ def keep(rows: list[RawOrder], notes: dict) -> list[RawOrder]:
     return [o for o in rows if not _excluded(o, notes)]
 
 
+LOADSHOP = "일반(로드샵)"
+CONSENT_OK, CONSENT_NO, CONSENT_NONE = "동의", "미동의", "미응답"
+
+
+def consent_stats(rows: list[RawOrder]) -> dict:
+    """로드샵 상점의 로봇배송 동의 현황. 상점ID 기준(상점 정보 없는 '0' 제외)이며 값은 주문이 가장 늦은 건 기준.
+    store_robot_consent 가 전부 NULL(컬럼 추가 전 수집분)이면 비율은 None."""
+    shop = {}
+    orders = [o for o in rows if o.store_type == LOADSHOP and o.store_robot_consent]
+    for o in sorted(orders, key=lambda o: o.ord_dt):
+        if o.store_id and o.store_id != "0":
+            shop[o.store_id] = o.store_robot_consent
+    n = {k: sum(1 for v in shop.values() if v == k) for k in (CONSENT_OK, CONSENT_NO, CONSENT_NONE)}
+    ok_orders = sum(1 for o in orders if o.store_robot_consent == CONSENT_OK)
+    return {
+        "consent_shops": n[CONSENT_OK], "noconsent_shops": n[CONSENT_NO], "noresp_shops": n[CONSENT_NONE],
+        "consent_shop_base": len(shop),
+        "consent_shop_pct": round(n[CONSENT_OK] / len(shop) * 100, 1) if shop else None,
+        "consent_order_n": ok_orders, "consent_order_base": len(orders),
+        "consent_order_pct": round(ok_orders / len(orders) * 100, 1) if orders else None,
+    }
+
+
 def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     excluded_n = len(rows) - len(keep(rows, notes))
     completed_all = len(rows)      # 집계제외까지 포함한 완료 건수(표의 "완료" 열). KPI 모수는 아니다.
@@ -206,6 +229,7 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "avg_pickup_min": _min(avg_pick),
         "avg_total_general_min": _min(_mean([o.s_order_finish for o in general])),
         "avg_total_robot_min": _min(_mean([o.s_order_finish for o in robots])),
+        "avg_pickup_robot_min": _min(_mean([_pickup_to_finish(o) for o in robots])),
         "delta_total_min": round(_min(avg_total) - base["total_min"], 1) if avg_total is not None else None,
         "delta_pickup_min": round(_min(avg_pick) - base["pickup_min"], 1) if avg_pick is not None else None,
         "timely_n": timely_n, "timely_base": len(elig),
@@ -215,7 +239,7 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "excluded_n": excluded_n,
         "time_n": sum(1 for v in total_secs if v is not None),
         "time_excluded_n": len(robots_all) - len(robots),
-        **annot,
+        **annot, **consent_stats(rows),
         "seg_robot": seg_robot, "seg_general": seg_general,
     }
 
@@ -348,6 +372,11 @@ def dashboard(session, p: Period) -> dict:
     notes = load_notes(session)
     rows = scoped_done(session, p.start, p.eff_end)
     m = compute_metrics(rows, notes)            # 내부에서 제외 건 반영
+    # 일평균 = 건수 ÷ 경과일수(D-1 까지). 진행 중인 주·월도 지난 날짜만큼으로 나눈다.
+    n_days = p.elapsed_days
+    m["avg_days"] = n_days
+    m["avg_completed"] = round(m["completed_all"] / n_days, 1) if n_days else None
+    m["avg_robot"] = round(m["robot_done"] / n_days, 1) if n_days else None
 
     de = data_end(date.today())
     # 트렌드 구간: 일 단위는 최근 14일, 그 외는 선택 기간
@@ -437,7 +466,7 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "delivery_id": o.delivery_id, "order_id": o.order_id, "ord_dt": o.ord_dt,
         "delivery_type": o.delivery_type, "is_robot": o.delivery_type == ROBOT,
         "robot_name": o.robot_name, "order_source": o.order_source, "store_name": o.store_name,
-        "store_type": o.store_type, "delivery_status": o.delivery_status,
+        "store_type": o.store_type, "consent": o.store_robot_consent or "", "delivery_status": o.delivery_status,
         "total_min": _min(o.s_order_finish), "dispatch_count": o.dispatch_count,
         "in_scope": o.store_type in CFG["store_types"],
         "miss_reason": (n.miss_reason if n and n.miss_reason else ""),

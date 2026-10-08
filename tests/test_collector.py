@@ -170,3 +170,27 @@ def test_month_chunks_splits_by_month():
 def test_month_chunks_single_day():
     assert list(collector.month_chunks(date(2026, 10, 2), date(2026, 10, 2))) == [
         (date(2026, 10, 2), date(2026, 10, 2))]
+
+
+def test_df_to_orders_maps_store_consent():
+    """Redash 쿼리의 상점ID·상점로봇동의상태가 정식 컬럼으로 들어간다. 쿼리에 없으면 None(수집은 안 깨짐)."""
+    o = collector.df_to_orders(pd.DataFrame([{**ROW, "상점ID": 77, "상점로봇동의상태": "미동의"}]))[0]
+    assert o.store_id == "77" and o.store_robot_consent == "미동의"
+    o = collector.df_to_orders(pd.DataFrame([ROW]))[0]
+    assert o.store_id is None and o.store_robot_consent is None
+
+
+def test_migrate_adds_consent_columns_to_existing_db(tmp_path):
+    """컬럼 추가 전 DB(운영 Postgres 와 같은 상황)에서도 시작 시 ALTER 로 보강된다."""
+    from sqlalchemy import create_engine, inspect, text
+    url = f"sqlite:///{tmp_path / 'old.db'}"
+    eng = create_engine(url)
+    with eng.begin() as c:
+        c.execute(text("CREATE TABLE raw_orders (delivery_id VARCHAR PRIMARY KEY)"))
+        c.execute(text("CREATE TABLE robot_order_notes (delivery_id VARCHAR PRIMARY KEY, miss_reason VARCHAR)"))
+        c.execute(text("INSERT INTO raw_orders VALUES ('1')"))
+    dbm._migrate(eng)
+    cols = {c["name"] for c in inspect(eng).get_columns("raw_orders")}
+    assert {"store_id", "store_robot_consent"} <= cols
+    with eng.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM raw_orders")).scalar() == 1   # 기존 행 보존
