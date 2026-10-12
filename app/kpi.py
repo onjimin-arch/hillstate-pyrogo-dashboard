@@ -159,21 +159,38 @@ def consent_stats(rows: list[RawOrder]) -> dict:
     }
 
 
-def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
-    excluded_n = len(rows) - len(keep(rows, notes))
-    completed_all = len(rows)      # 집계제외까지 포함한 완료 건수(표의 "완료" 열). KPI 모수는 아니다.
-    # 특이사항 집계는 제외 건까지 포함한 전체 기준 (기록된 건을 한눈에 보기 위함)
+def unfinished_robots(session, s: date, e: date) -> list[RawOrder]:
+    """미완료(취소 등) 로봇연계 건. KPI 모수는 아니지만 로봇 건 리스트에는 보이므로 특이사항 카드 집계에만 쓴다."""
+    if e < s:
+        return []
+    lo, hi = _bounds(s, e)
+    q = select(RawOrder).where(
+        RawOrder.building == CFG["building"], RawOrder.store_type.in_(CFG["store_types"]),
+        RawOrder.delivery_type == ROBOT, RawOrder.delivery_status != DONE,
+        RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
+    return list(session.scalars(q))
+
+
+def annotation_counts(rows: list[RawOrder], notes: dict) -> dict:
+    """특이사항·집계 제외 카드 집계. 제외 건까지 포함한 전체 기준 (기록된 건을 한눈에 보기 위함)."""
     ann = [notes[o.delivery_id] for o in rows if o.delivery_id in notes]
     ann = [n for n in ann if n.note or n.exclude_from_kpi or n.miss_reason
            or (n.result_type and n.result_type != "정상")]
-    annot = {
+    return {
         "annotated_n": len(ann),
         "noted_n": sum(1 for n in ann if n.note),
         "fail_n": sum(1 for n in ann if n.result_type == "실패"),
         "other_n": sum(1 for n in ann if n.result_type == "기타"),
         "err_n": sum(1 for n in ann if n.result_type == "완료(오류)"),
         "miss_n": sum(1 for n in ann if n.miss_reason),
+        "excluded_all_n": sum(1 for n in ann if n.exclude_from_kpi),
     }
+
+
+def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
+    excluded_n = len(rows) - len(keep(rows, notes))
+    completed_all = len(rows)      # 집계제외까지 포함한 완료 건수(표의 "완료" 열). KPI 모수는 아니다.
+    annot = annotation_counts(rows, notes)
     rows = keep(rows, notes)
     robots_all = [o for o in rows if o.delivery_type == ROBOT]
     general = [o for o in rows if o.delivery_type != ROBOT]
@@ -230,6 +247,8 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "avg_total_general_min": _min(_mean([o.s_order_finish for o in general])),
         "avg_total_robot_min": _min(_mean([o.s_order_finish for o in robots])),
         "avg_pickup_robot_min": _min(_mean([_pickup_to_finish(o) for o in robots])),
+        "avg_dockclose_robot_min": _min(_mean([o.s_dockclose_robotfinish for o in robots])),
+        "robot_time_n": len(robots),
         "delta_total_min": round(_min(avg_total) - base["total_min"], 1) if avg_total is not None else None,
         "delta_pickup_min": round(_min(avg_pick) - base["pickup_min"], 1) if avg_pick is not None else None,
         "timely_n": timely_n, "timely_base": len(elig),
@@ -372,6 +391,10 @@ def dashboard(session, p: Period) -> dict:
     notes = load_notes(session)
     rows = scoped_done(session, p.start, p.eff_end)
     m = compute_metrics(rows, notes)            # 내부에서 제외 건 반영
+    # 특이사항 카드는 목록과 맞추기 위해 미완료 로봇 건도 포함 (다른 지표는 완료 건 기준 그대로)
+    unf = unfinished_robots(session, p.start, p.eff_end)
+    m.update(annotation_counts(rows + unf, notes))
+    m["unfinished_ann_n"] = annotation_counts(unf, notes)["annotated_n"]
     # 일평균 = 건수 ÷ 경과일수(D-1 까지). 진행 중인 주·월도 지난 날짜만큼으로 나눈다.
     n_days = p.elapsed_days
     m["avg_days"] = n_days
@@ -419,7 +442,7 @@ def robot_list(session, p: Period, flt: str | None = None) -> list[dict]:
         row = row_view(o, n)
         out.append(row)
     if flt == "noted":
-        out = [r for r in out if r["note"]]
+        out = [r for r in out if r["note"] or r["exclude"] or r["result_type"] not in ("", "정상")]
     elif flt == "excluded":
         out = [r for r in out if r["exclude"]]
     elif flt == "error":
