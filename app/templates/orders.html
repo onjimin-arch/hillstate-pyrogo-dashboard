@@ -36,12 +36,12 @@
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
-    <th>접수</th><th>배송 유형</th><th>주문처 / 상점</th><th>상점구분</th><th>로봇 동의</th><th>상태</th><th>접수→완료</th>
+    <th>접수</th><th>배송 유형</th><th>주문처 / 상점</th><th>상점구분</th><th>로봇 동의</th><th>상태</th><th>접수→완료</th><th>적재함닫힘→완료</th>
     <th>배차횟수</th><th>사유 구분</th><th>특이사항</th><th>집계 제외</th><th>수정</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}{% include "_order_row.html" %}{% else %}
-  <tr><td colspan="11" class="empty">조건에 맞는 주문이 없습니다.</td></tr>
+  <tr><td colspan="12" class="empty">조건에 맞는 주문이 없습니다.</td></tr>
   {% endfor %}
   </tbody>
 </table>

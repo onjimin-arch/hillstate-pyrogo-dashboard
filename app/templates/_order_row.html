@@ -9,6 +9,7 @@
   <td>{% if r.consent == '동의' %}<span class="badge">동의</span>{% elif r.consent %}<span class="badge warn">{{ r.consent }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
   <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
   <td>{{ r.total_min | num(1) }}분</td>
+  <td class="{{ 'late' if r.late }}">{% if r.is_robot %}{{ r.hand_min | num(1) }}분{% if r.late %} ▲{% endif %}{% else %}<span class="mut">-</span>{% endif %}</td>
   <td>{{ r.dispatch_count if r.dispatch_count is not none else '-' }}</td>
   <td>
     {% if r.is_robot %}

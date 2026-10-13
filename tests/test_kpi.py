@@ -163,6 +163,10 @@ def test_order_list_filters_and_miss_candidates(session):
     assert kpi.order_list(session, p, "miss")["total"] == 3
     assert kpi.order_list(session, p, st="b2b")["total"] == 1
     assert kpi.order_list(session, p, q="3")["total"] >= 1
+    by_id = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
+    assert (by_id["3"]["hand_min"], by_id["3"]["late"]) == (5.0, False)      # 적재함닫힘→완료 300초
+    assert (by_id["4"]["hand_min"], by_id["4"]["late"]) == (8.3, True)       # 500초 > 7분
+    assert by_id["1"]["hand_min"] is None and not by_id["1"]["late"]         # 일반 건은 값 없음
 
 
 def test_order_note_endpoint_test_order_excluded_from_kpi(session):

@@ -7,10 +7,6 @@
     {% if p.eff_end < p.start %}<br>아직 전일(D-1) 기준으로 표시 가능한 날짜가 아닙니다.{% endif %}</div>
 {% endif %}
 
-{% set day_split = p.grain == 'day' and dd and m.completed %}
-{% set week_split = p.grain == 'week' %}
-{% set agg_split = p.grain in ('month', 'custom') %}
-{% if day_split or week_split or agg_split %}<div class="split"><div class="col">{% endif %}
 <div class="group-title">완료 건수 · 로봇 이용</div>
 <div class="cards">
   <div class="card">
@@ -40,6 +36,64 @@
   </div>
 </div>
 
+{% macro all_tbl(rows, kind) %}
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
+    <th>접수→완료(분)<br>전체</th><th>픽업→완료(분)<br>전체</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}{% set x = r.m %}
+  <tr>
+    <td>{% if kind == 'day' %}{{ r.date.strftime('%m/%d') }} ({{ '월화수목금토일'[r.date.weekday()] }}){% else %}{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}{% endif %}</td>
+    <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
+    <td>{{ x.excluded_n or '' }}</td>
+    <td>{{ x.usage_pct | num(1, '%') }}</td>
+    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
+  </tr>
+  {% else %}<tr><td colspan="9" class="empty">데이터 없음</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+{% macro robot_tbl(rows, kind) %}
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>로봇연계</th>
+    <th>접수→완료(분)<br>로봇</th><th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇−전체</th>
+    <th>픽업→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇−전체</th>
+    <th>적재함닫힘→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}{% set x = r.m %}
+  <tr>
+    <td>{% if kind == 'day' %}{{ r.date.strftime('%m/%d') }} ({{ '월화수목금토일'[r.date.weekday()] }}){% else %}{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}{% endif %}</td>
+    <td>{{ x.robot_done }}</td>
+    <td>{{ x.avg_total_robot_min | num(1) }}</td><td>{{ x.avg_total_min | num(1) }}</td><td>{% if x.avg_total_robot_min is not none and x.avg_total_min is not none %}{{ '%+.1f' | format(x.avg_total_robot_min - x.avg_total_min) }}{% else %}-{% endif %}</td>
+    <td>{{ x.avg_pickup_robot_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td><td>{% if x.avg_pickup_robot_min is not none and x.avg_pickup_min is not none %}{{ '%+.1f' | format(x.avg_pickup_robot_min - x.avg_pickup_min) }}{% else %}-{% endif %}</td>
+    <td><b>{{ x.avg_dockclose_robot_min | num(1) }}</b></td>
+    <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
+  </tr>
+  {% else %}<tr><td colspan="11" class="empty">데이터 없음</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+{% if p.grain != 'day' %}
+<div class="group-title">일자별 주요 항목 · 전체 배송<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+{{ all_tbl(day_rows, 'day') }}
+<div class="group-title">일자별 주요 항목 · 로봇 배송 (전체와 비교)<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+{{ robot_tbl(day_rows, 'day') }}
+{% if p.grain in ('month', 'custom') %}
+<div class="group-title">주간 누적 · 전체 배송<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+{{ all_tbl(week_rows, 'week') }}
+<div class="group-title">주간 누적 · 로봇 배송 (전체와 비교)<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+{{ robot_tbl(week_rows, 'week') }}
+{% endif %}
+{% endif %}
+
 <div class="group-title">배송시간 (평균{{ ', 일 단위는 표본이 작아 변동이 큽니다' if p.grain == 'day' }})</div>
 <div class="cards">
   <div class="card" title="중앙값 {{ m.median_total_min | num(1, '분') }}">
@@ -63,17 +117,17 @@
   <div class="card">
     <div class="k">로봇 접수 → 완료</div>
     <div class="v">{{ m.avg_total_robot_min | num(1) }}<small>분</small></div>
-    <div class="sub">일반 {{ m.avg_total_general_min | num(1, '분') }} · n={{ m.robot_time_n }}</div>
+    <div class="sub">일반 {{ m.avg_total_general_min | num(1, '분') }} · <b>n={{ m.robot_total_n }}건</b>{% if m.time_excluded_n %} (완료(오류) {{ m.time_excluded_n }}건 제외){% endif %}</div>
   </div>
   <div class="card">
     <div class="k">로봇 픽업 → 완료</div>
     <div class="v">{{ m.avg_pickup_robot_min | num(1) }}<small>분</small></div>
-    <div class="sub">적재함 대기·로봇 주행 포함 · n={{ m.robot_time_n }}</div>
+    <div class="sub">적재함 대기·로봇 주행 포함 · <b>n={{ m.robot_pickup_n }}건</b>{% if m.time_excluded_n %} (완료(오류) {{ m.time_excluded_n }}건 제외){% endif %}</div>
   </div>
   <div class="card">
     <div class="k">로봇 적재함 닫힘 → 완료</div>
     <div class="v">{{ m.avg_dockclose_robot_min | num(1) }}<small>분</small></div>
-    <div class="sub">적시 배송 기준 {{ cfg.timely_threshold_sec // 60 }}분 · 적재함 열림 시각은 수집 데이터에 없음</div>
+    <div class="sub"><b>n={{ m.robot_dock_n }}건</b>{% if m.time_excluded_n %} (완료(오류) {{ m.time_excluded_n }}건 제외){% endif %} · 적시 기준 {{ cfg.timely_threshold_sec // 60 }}분 · 적재함 열림 시각은 수집 데이터에 없음</div>
   </div>
 </div>
 
@@ -97,69 +151,8 @@
     {% if m.fail_n %}<div class="sub">실패로 기록된 건 {{ m.fail_n }}건</div>{% endif %}
   </div>
 </div>
-{% if day_split or week_split or agg_split %}</div>{% endif %}
-{% if agg_split %}
-<div class="col">
-<div class="group-title">주간 누적<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
-<div class="tablewrap">
-<table class="list">
-  <thead><tr>
-    <th>주간</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
-    <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
-  </tr></thead>
-  <tbody>
-  {% for r in week_rows %}{% set x = r.m %}
-  <tr>
-    <td>{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}</td>
-    <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
-    <td>{{ x.excluded_n or '' }}</td>
-    <td>{{ x.usage_pct | num(1, '%') }}</td>
-    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_total_robot_min | num(1) }}</td>
-    <td>{{ x.avg_pickup_min | num(1) }}</td><td>{{ x.avg_pickup_robot_min | num(1) }}</td>
-    <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
-  </tr>
-  {% else %}<tr><td colspan="13" class="empty">데이터 없음</td></tr>{% endfor %}
-  </tbody>
-</table>
-</div>
-</div></div>
-{% endif %}
-{% if p.grain != 'day' %}
-{% if week_split %}<div class="col">{% endif %}
-<div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
-<div class="tablewrap">
-<table class="list">
-  <thead><tr>
-    <th>일자</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
-    <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
-  </tr></thead>
-  <tbody>
-  {% for r in day_rows %}{% set x = r.m %}
-  <tr>
-    <td>{{ r.date.strftime('%m/%d') }} ({{ '월화수목금토일'[r.date.weekday()] }})</td>
-    <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
-    <td>{{ x.excluded_n or '' }}</td>
-    <td>{{ x.usage_pct | num(1, '%') }}</td>
-    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_total_robot_min | num(1) }}</td>
-    <td>{{ x.avg_pickup_min | num(1) }}</td><td>{{ x.avg_pickup_robot_min | num(1) }}</td>
-    <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
-  </tr>
-  {% else %}<tr><td colspan="13" class="empty">데이터 없음</td></tr>{% endfor %}
-  </tbody>
-</table>
-</div>
-{% if week_split %}
-<div class="chart-card" style="margin-top:14px">
-  <h3>일별 완료 건수</h3>
-  <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }}</p>
-  <canvas id="dailyChart"></canvas>
-</div>
-</div></div>
-{% endif %}
-{% endif %}
 
 {% if dd and m.completed %}
-{% if day_split %}<div class="col">{% endif %}
 <div class="group-title">일 상세 · 시간 분포 {% if dd.time_n < 10 %}<span style="font-weight:400;color:var(--muted)">(표본 {{ dd.time_n }}건 · P90은 참고용)</span>{% endif %}</div>
 <div class="cards">
   <div class="card">
@@ -203,7 +196,6 @@
 </table>
 </div>
 {% else %}<div class="card empty">적시 미달 건이 없습니다.</div>{% endif %}
-{% if day_split %}</div></div>{% endif %}
 {% endif %}
 
 {% if p.grain != 'day' %}
@@ -214,13 +206,15 @@
     <p class="d">로봇연계는 라이더 픽업 후 적재함 대기 구간이 포함됩니다. 일반 건은 도킹·로봇 구간이 없습니다.</p>
     <canvas id="segChart"></canvas>
   </div>
-  {% if not week_split %}
   <div class="chart-card">
     <h3>일별 완료 건수</h3>
     <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }}</p>
     <canvas id="dailyChart"></canvas>
   </div>
-  {% endif %}
+</div>
+
+<div class="group-title">주별 · 시간대별 추이</div>
+<div class="charts">
   <div class="chart-card">
     <h3>주별 평균 접수→완료 (분)</h3>
     <p class="d">최근 12주 · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>
