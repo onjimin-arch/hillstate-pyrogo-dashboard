@@ -126,6 +126,20 @@ def test_annotation_counts_include_excluded(session):
     assert (m["annotated_n"], m["noted_n"], m["fail_n"], m["other_n"], m["excluded_n"]) == (3, 2, 1, 1, 1)
 
 
+def test_annotation_card_includes_unfinished_robot_orders(session):
+    # 미완료(취소 등) 로봇 건도 로봇 건 리스트에 보이므로 특이사항 카드에 포함. 다른 지표는 완료 건 기준 유지.
+    session.add_all([make_order(8, robot=True, status="CANCELED"), make_order(9, robot=True, status="CANCELED")])
+    session.add(dbm.RobotOrderNote(delivery_id="4", result_type="실패", note="완료 건", exclude_from_kpi=True))
+    session.add(dbm.RobotOrderNote(delivery_id="8", result_type="실패", note="미완료", exclude_from_kpi=True))
+    session.add(dbm.RobotOrderNote(delivery_id="9", result_type="실패", note="미완료", exclude_from_kpi=True))
+    session.commit()
+    p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
+    m = kpi.dashboard(session, p)["metrics"]
+    assert (m["annotated_n"], m["fail_n"], m["excluded_all_n"], m["unfinished_ann_n"]) == (3, 3, 3, 2)
+    assert m["completed"] == 5 and m["completed_all"] == 6 and m["excluded_n"] == 1   # 건수 지표는 완료 건만
+    assert {r["delivery_id"] for r in kpi.robot_list(session, p, "noted")} == {"4", "8", "9"}
+
+
 def test_completed_with_error_counts_as_success_but_not_in_time(session):
     # 5번: 로봇 이상치(5000초) — 시스템 오류로 시간만 비정상인 완료 건
     session.add(dbm.RobotOrderNote(delivery_id="5", result_type="완료(오류)", note="이벤트 오입력"))

@@ -27,8 +27,8 @@
   </div>
   <div class="card">
     <div class="k">특이사항 · 집계 제외 <a href="/robots?grain={{ p.grain }}&d={{ p.start }}{% if p.grain == 'custom' %}&start={{ p.start }}&end={{ p.end }}{% endif %}&flt=noted" style="margin-left:auto;font-size:12px">목록 보기 ›</a></div>
-    <div class="v">{{ m.excluded_n }}<small>건 제외</small></div>
-    <div class="sub">특이사항 기록 {{ m.annotated_n }}건 (비고 입력 {{ m.noted_n }}건)</div>
+    <div class="v">{{ m.excluded_all_n }}<small>건 제외</small></div>
+    <div class="sub">특이사항 기록 {{ m.annotated_n }}건 (비고 입력 {{ m.noted_n }}건){% if m.unfinished_ann_n %} · 미완료 {{ m.unfinished_ann_n }}건 포함{% endif %}</div>
     <div class="sub">완료(오류) {{ m.err_n }}건(시간만 제외) · 실패 {{ m.fail_n }}건 · 기타 {{ m.other_n }}건</div>
     <div class="sub">로봇 누락 사유 기록 {{ m.miss_n }}건</div>
   </div>
@@ -55,6 +55,25 @@
     <div class="delta">{{ cfg.baseline.label }} {{ cfg.baseline.pickup_min }}분 대비
       {% if m.delta_pickup_min is not none %}{{ '%+.1f' | format(m.delta_pickup_min) }}분{% else %}-{% endif %}</div>
     <div class="sub">로봇연계는 적재함 대기·로봇 주행 포함{% if m.time_excluded_n %} · 완료(오류) {{ m.time_excluded_n }}건은 시간 평균에서 제외{% endif %}</div>
+  </div>
+</div>
+
+<div class="group-title">로봇 배송시간 (평균)</div>
+<div class="cards">
+  <div class="card">
+    <div class="k">로봇 접수 → 완료</div>
+    <div class="v">{{ m.avg_total_robot_min | num(1) }}<small>분</small></div>
+    <div class="sub">일반 {{ m.avg_total_general_min | num(1, '분') }} · n={{ m.robot_time_n }}</div>
+  </div>
+  <div class="card">
+    <div class="k">로봇 픽업 → 완료</div>
+    <div class="v">{{ m.avg_pickup_robot_min | num(1) }}<small>분</small></div>
+    <div class="sub">적재함 대기·로봇 주행 포함 · n={{ m.robot_time_n }}</div>
+  </div>
+  <div class="card">
+    <div class="k">로봇 적재함 닫힘 → 완료</div>
+    <div class="v">{{ m.avg_dockclose_robot_min | num(1) }}<small>분</small></div>
+    <div class="sub">적시 배송 기준 {{ cfg.timely_threshold_sec // 60 }}분 · 적재함 열림 시각은 수집 데이터에 없음</div>
   </div>
 </div>
 
