@@ -233,7 +233,21 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "픽업→완료": _min(_mean([_pickup_to_finish(o) for o in general])),
     }
 
+    def seg_row(lst, robot_only=False):
+        avg = lambda f: _min(_mean([f(o) for o in lst]))
+        return {
+            "n": len(lst),
+            "order_dispatch": avg(lambda o: o.s_order_dispatch),
+            "dispatch_pickup": avg(lambda o: o.s_dispatch_pickup),
+            "pickup_dock": avg(lambda o: o.s_pickup_dockclose) if robot_only else None,
+            "dock_finish": avg(lambda o: o.s_dockclose_robotfinish) if robot_only else None,
+            "total": avg(lambda o: o.s_order_finish),
+            "pickup_finish": avg(_pickup_to_finish),
+        }
+    seg_cmp = {"all": seg_row(timed), "general": seg_row(general), "robot": seg_row(robots, True)}
+
     return {
+        "seg_cmp": seg_cmp,
         "completed": len(rows),
         "completed_all": completed_all,
         "robot_done": len(robots_all),
@@ -248,7 +262,9 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "avg_total_robot_min": _min(_mean([o.s_order_finish for o in robots])),
         "avg_pickup_robot_min": _min(_mean([_pickup_to_finish(o) for o in robots])),
         "avg_dockclose_robot_min": _min(_mean([o.s_dockclose_robotfinish for o in robots])),
-        "robot_time_n": len(robots),
+        "robot_total_n": sum(1 for o in robots if o.s_order_finish is not None),
+        "robot_pickup_n": sum(1 for o in robots if _pickup_to_finish(o) is not None),
+        "robot_dock_n": sum(1 for o in robots if o.s_dockclose_robotfinish is not None),
         "delta_total_min": round(_min(avg_total) - base["total_min"], 1) if avg_total is not None else None,
         "delta_pickup_min": round(_min(avg_pick) - base["pickup_min"], 1) if avg_pick is not None else None,
         "timely_n": timely_n, "timely_base": len(elig),
@@ -491,6 +507,8 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "robot_name": o.robot_name, "order_source": o.order_source, "store_name": o.store_name,
         "store_type": o.store_type, "consent": o.store_robot_consent or "", "delivery_status": o.delivery_status,
         "total_min": _min(o.s_order_finish), "dispatch_count": o.dispatch_count,
+        "hand_min": _min(o.s_dockclose_robotfinish),
+        "late": (o.s_dockclose_robotfinish is not None and o.s_dockclose_robotfinish > CFG["timely_threshold_sec"]),
         "in_scope": o.store_type in CFG["store_types"],
         "miss_reason": (n.miss_reason if n and n.miss_reason else ""),
         "note": (n.note if n and n.note else ""),
