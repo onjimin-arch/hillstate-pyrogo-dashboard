@@ -233,7 +233,21 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "픽업→완료": _min(_mean([_pickup_to_finish(o) for o in general])),
     }
 
+    def seg_row(lst, robot_only=False):
+        avg = lambda f: _min(_mean([f(o) for o in lst]))
+        return {
+            "n": len(lst),
+            "order_dispatch": avg(lambda o: o.s_order_dispatch),
+            "dispatch_pickup": avg(lambda o: o.s_dispatch_pickup),
+            "pickup_dock": avg(lambda o: o.s_pickup_dockclose) if robot_only else None,
+            "dock_finish": avg(lambda o: o.s_dockclose_robotfinish) if robot_only else None,
+            "total": avg(lambda o: o.s_order_finish),
+            "pickup_finish": avg(_pickup_to_finish),
+        }
+    seg_cmp = {"all": seg_row(timed), "general": seg_row(general), "robot": seg_row(robots, True)}
+
     return {
+        "seg_cmp": seg_cmp,
         "completed": len(rows),
         "completed_all": completed_all,
         "robot_done": len(robots_all),

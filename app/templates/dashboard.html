@@ -41,7 +41,7 @@
 <table class="list">
   <thead><tr>
     <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
-    <th>접수→완료(분)<br>전체</th><th>픽업→완료(분)<br>전체</th>
+    <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}{% set x = r.m %}
@@ -50,49 +50,51 @@
     <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
     <td>{{ x.excluded_n or '' }}</td>
     <td>{{ x.usage_pct | num(1, '%') }}</td>
-    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td>
-  </tr>
-  {% else %}<tr><td colspan="9" class="empty">데이터 없음</td></tr>{% endfor %}
-  </tbody>
-</table>
-</div>
-{% endmacro %}
-{% macro robot_tbl(rows, kind) %}
-<div class="tablewrap">
-<table class="list">
-  <thead><tr>
-    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>로봇연계</th>
-    <th>접수→완료(분)<br>로봇</th><th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇−전체</th>
-    <th>픽업→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇−전체</th>
-    <th>적재함닫힘→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
-  </tr></thead>
-  <tbody>
-  {% for r in rows %}{% set x = r.m %}
-  <tr>
-    <td>{% if kind == 'day' %}{{ r.date.strftime('%m/%d') }} ({{ '월화수목금토일'[r.date.weekday()] }}){% else %}{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}{% endif %}</td>
-    <td>{{ x.robot_done }}</td>
-    <td>{{ x.avg_total_robot_min | num(1) }}</td><td>{{ x.avg_total_min | num(1) }}</td><td>{% if x.avg_total_robot_min is not none and x.avg_total_min is not none %}{{ '%+.1f' | format(x.avg_total_robot_min - x.avg_total_min) }}{% else %}-{% endif %}</td>
-    <td>{{ x.avg_pickup_robot_min | num(1) }}</td><td>{{ x.avg_pickup_min | num(1) }}</td><td>{% if x.avg_pickup_robot_min is not none and x.avg_pickup_min is not none %}{{ '%+.1f' | format(x.avg_pickup_robot_min - x.avg_pickup_min) }}{% else %}-{% endif %}</td>
-    <td><b>{{ x.avg_dockclose_robot_min | num(1) }}</b></td>
+    <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_total_robot_min | num(1) }}</td>
+    <td>{{ x.avg_pickup_min | num(1) }}</td><td>{{ x.avg_pickup_robot_min | num(1) }}</td>
     <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
   </tr>
-  {% else %}<tr><td colspan="11" class="empty">데이터 없음</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="13" class="empty">데이터 없음</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
 {% endmacro %}
 {% if p.grain != 'day' %}
-<div class="group-title">일자별 주요 항목 · 전체 배송<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+<div class="group-title">일자별 주요 항목<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
 {{ all_tbl(day_rows, 'day') }}
-<div class="group-title">일자별 주요 항목 · 로봇 배송 (전체와 비교)<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
-{{ robot_tbl(day_rows, 'day') }}
 {% if p.grain in ('month', 'custom') %}
-<div class="group-title">주간 누적 · 전체 배송<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
+<div class="group-title">주간 누적<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
 {{ all_tbl(week_rows, 'week') }}
-<div class="group-title">주간 누적 · 로봇 배송 (전체와 비교)<span style="font-weight:400;color:var(--muted)">{{ trend_range[0] }} ~ {{ trend_range[1] }}</span></div>
-{{ robot_tbl(week_rows, 'week') }}
 {% endif %}
 {% endif %}
+
+<div class="group-title">구간별 평균 시간 비교 (분)<span style="font-weight:400;color:var(--muted)">{{ p.label }} · 완료(오류)·집계 제외 건은 시간에서 제외</span></div>
+<div class="tablewrap">
+<table class="list">
+  <thead><tr>
+    <th>구분</th><th>건수</th><th>접수→배차</th><th>배차→픽업완료</th><th>픽업완료→적재함닫힘</th><th>적재함닫힘→완료</th>
+    <th>접수→완료<br>합계</th><th>픽업→완료<br>합계</th>
+  </tr></thead>
+  <tbody>
+  {% for key, label in [('all', '전체 평균'), ('general', '일반 배송 평균'), ('robot', '로봇 배송 평균')] %}{% set c = m.seg_cmp[key] %}
+  <tr{% if key == 'robot' %} style="font-weight:600"{% endif %}>
+    <td>{{ label }}</td><td>{{ c.n }}</td>
+    <td>{{ c.order_dispatch | num(1) }}</td><td>{{ c.dispatch_pickup | num(1) }}</td>
+    <td>{{ c.pickup_dock | num(1) }}</td><td>{{ c.dock_finish | num(1) }}</td>
+    <td>{{ c.total | num(1) }}</td><td>{{ c.pickup_finish | num(1) }}</td>
+  </tr>
+  {% endfor %}
+  {% set g = m.seg_cmp.general %}{% set r = m.seg_cmp.robot %}
+  <tr class="mut">
+    <td>로봇 − 일반</td><td></td>
+    {% for k in ['order_dispatch', 'dispatch_pickup'] %}<td>{% if r[k] is not none and g[k] is not none %}{{ '%+.1f' | format(r[k] - g[k]) }}{% else %}-{% endif %}</td>{% endfor %}
+    <td>-</td><td>-</td>
+    {% for k in ['total', 'pickup_finish'] %}<td>{% if r[k] is not none and g[k] is not none %}{{ '%+.1f' | format(r[k] - g[k]) }}{% else %}-{% endif %}</td>{% endfor %}
+  </tr>
+  </tbody>
+</table>
+</div>
+<div class="sub" style="margin:6px 2px 0">일반 건은 적재함 구간이 없어 "-"입니다. 로봇의 픽업→완료는 적재함 대기·로봇 주행을 포함합니다.</div>
 
 <div class="group-title">배송시간 (평균{{ ', 일 단위는 표본이 작아 변동이 큽니다' if p.grain == 'day' }})</div>
 <div class="cards">
