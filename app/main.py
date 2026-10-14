@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -188,13 +188,17 @@ def robots(request: Request, grain: str = "week", d: str | None = None,
 @app.get("/orders", response_class=HTMLResponse)
 def orders(request: Request, grain: str = "day", d: str | None = None,
            start: str | None = None, end: str | None = None, flt: str | None = None,
-           st: str | None = None, q: str | None = None, page: int = 1, db=Depends(get_db)):
+           st: str | None = None, q: str | None = None, page: int = 1,
+           sort: str | None = None, sdir: str = Query("desc", alias="dir"), db=Depends(get_db)):
     p = _period_ctx(grain, d, start, end)
     ctx = _common(request, p, db, "orders")
-    res = kpi.order_list(db, p, flt, st, q, page)
+    res = kpi.order_list(db, p, flt, st, q, page, sort, sdir != "asc")
     extra = (f"&st={st}" if st else "") + (f"&q={quote(q)}" if q else "")
+    sort_qs = f"&sort={sort}&dir={sdir}" if sort else ""
     ctx.update(res, flt=flt or "", st=st or "", q=q or "", miss_reasons=kpi.MISS_REASONS,
-               extra_qs=extra, base_path="/orders")
+               sort=sort or "", sdir=sdir, sort_qs=sort_qs,
+               segs=kpi.SEG_COLS, seg_names=kpi.SEG_NAMES,
+               extra_qs=extra + sort_qs, extra_nosort=extra, base_path="/orders")
     return templates.TemplateResponse(request, "orders.html", ctx)
 
 
@@ -216,7 +220,8 @@ def save_order_note(request: Request, delivery_id: str, miss_reason: str = Form(
     db.commit()
     return templates.TemplateResponse(
         request, "_order_row.html",
-        {"r": kpi.order_row_view(o, n), "miss_reasons": kpi.MISS_REASONS, "saved": True})
+        {"r": kpi.order_row_view(o, n), "miss_reasons": kpi.MISS_REASONS,
+         "segs": kpi.SEG_COLS, "seg_names": kpi.SEG_NAMES, "saved": True})
 
 
 @app.post("/robots/{delivery_id}/note", response_class=HTMLResponse)

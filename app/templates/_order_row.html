@@ -8,9 +8,16 @@
   <td>{{ r.store_type or '-' }}{% if not r.in_scope %}<div class="mut">집계 모수 아님</div>{% endif %}</td>
   <td>{% if r.consent == '동의' %}<span class="badge">동의</span>{% elif r.consent %}<span class="badge warn">{{ r.consent }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
   <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
-  <td>{{ r.total_min | num(1) }}분</td>
-  <td class="{{ 'late' if r.late }}">{% if r.is_robot %}{{ r.hand_min | num(1) }}분{% if r.late %} ▲{% endif %}{% else %}<span class="mut">-</span>{% endif %}</td>
-  <td>{{ r.dispatch_count if r.dispatch_count is not none else '-' }}</td>
+  <td class="num tot">{{ r.total_min | num(1) }}</td>
+  {% for k, lab, tip in segs %}
+  <td class="num {{ 'segmax' if r.longest == k }} {{ 'late' if k == 's4' and r.late }}"
+      {% if k == 's5' %}title="{{ '로봇배송완료→배달완료 (완료 처리)' if r.is_robot else '픽업완료→배달완료 (라이더가 고객에게 전달)' }}"{% endif %}>
+    {%- if r.segs[k] is not none %}{{ r.segs[k] | num(1) }}{% if k == 's4' and r.late %} ▲{% endif %}
+    {%- else %}<span class="mut">-</span>{% endif -%}
+  </td>
+  {% endfor %}
+  <td class="mut">{{ seg_names.get(r.longest) or '-' }}</td>
+  <td class="num">{{ r.dispatch_count if r.dispatch_count is not none else '-' }}{% if (r.dispatch_count or 0) > 1 %}<div class="mut" title="재배차 건은 ①접수→배차 가 어느 배차 기준인지에 따라 해석이 달라집니다">재배차</div>{% endif %}</td>
   <td>
     {% if r.is_robot %}
       <span class="mut">로봇 처리 건<br>(결과 구분은 '로봇 배송 건' 탭)</span>

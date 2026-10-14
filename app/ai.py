@@ -217,6 +217,11 @@ DB에 수집된 주문 데이터의 범위는 접수일 기준 {cover}이다.
 ## 지표 정의
 - 완료 건수: 모수 중 delivery_status='DROP_FINISHED'. 로봇 완료 건수: delivery_type='로봇연계'. 로봇 이용률 = 로봇연계 ÷ 전체 완료(로드샵+B2B).
 - 접수→완료 = s_order_finish, 픽업→완료 = s_order_finish - s_order_pickup.
+- 구간 분해(대시보드·전체 주문 화면의 ①~⑤와 같은 번호다. 사용자가 '②구간'처럼 번호로 물으면 이 매핑을 쓴다):
+  ①접수→배차 = s_order_dispatch, ②배차→픽업완료 = s_dispatch_pickup(상점 조리 대기 포함),
+  ③픽업완료→적재함닫힘 = s_pickup_dockclose(로봇 건만), ④적재함닫힘→로봇배송완료 = s_dockclose_robotfinish(로봇 건만),
+  ⑤배달완료까지 = 로봇 건은 finish_dt - robot_finish_dt(완료 처리), 일반 건은 finish_dt - pickup_dt(라이더가 고객에게 전달).
+  ①+②+③+④+⑤ = 접수→완료. ⑤는 로봇·일반의 기준 시점이 달라 둘을 직접 비교하지 않는다.
 - 로봇 적시 배송률 = s_dockclose_robotfinish <= {CFG['timely_threshold_sec']}초(7분) 건수 ÷ 로봇연계 건수 (목표 {CFG['targets']['timely_pct']}%).
 - 8월 baseline: 완료 {CFG['baseline']['orders']}건, 접수→완료 {CFG['baseline']['total_min']}분, 픽업→완료 {CFG['baseline']['pickup_min']}분. PoC 기간: {CFG['poc']['start']} ~ {CFG['poc']['end']}.
 - 날짜 기준은 접수 시각(ord_dt, KST). 주는 월~일.

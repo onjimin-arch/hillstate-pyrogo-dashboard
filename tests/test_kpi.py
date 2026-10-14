@@ -169,6 +169,36 @@ def test_order_list_filters_and_miss_candidates(session):
     assert by_id["1"]["hand_min"] is None and not by_id["1"]["late"]         # 일반 건은 값 없음
 
 
+def test_order_segments_and_sorting(session):
+    """구간 분해: ①②⑤는 모든 건, ③④는 로봇 건만. ⑤는 타임스탬프에서 파생한다."""
+    o = session.get(dbm.RawOrder, "3")                  # 로봇 건
+    o.pickup_dt = datetime(2026, 9, 30, 12, 10)
+    o.robot_finish_dt = datetime(2026, 9, 30, 12, 20)
+    o.finish_dt = datetime(2026, 9, 30, 12, 23)         # 로봇배송완료→배달완료 3분
+    g = session.get(dbm.RawOrder, "1")                  # 일반 건
+    g.pickup_dt = datetime(2026, 9, 30, 12, 5)
+    g.finish_dt = datetime(2026, 9, 30, 12, 17)         # 픽업완료→배달완료 12분
+    session.commit()
+
+    p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
+    by_id = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
+    assert by_id["3"]["segs"] == {"s1": 0.5, "s2": 5.0, "s3": 5.0, "s4": 5.0, "s5": 3.0}
+    assert by_id["1"]["segs"]["s3"] is None and by_id["1"]["segs"]["s4"] is None   # 일반 건은 적재함 구간 없음
+    assert by_id["1"]["segs"]["s5"] == 12.0                                       # 일반 건 ⑤는 픽업완료 기준
+    assert by_id["1"]["longest"] == "s5"
+    assert by_id["2"]["segs"]["s5"] is None and by_id["2"]["longest"] == "s2"      # 완료일시 없으면 ⑤ 없음
+
+    desc = [x["delivery_id"] for x in kpi.order_list(session, p, sort="s5")["rows"]]
+    assert desc[:2] == ["1", "3"]                       # 12.0 → 3.0
+    assert kpi.order_list(session, p, sort="s5")["rows"][-1]["segs"]["s5"] is None  # 값 없는 건은 항상 뒤
+    asc = [x["delivery_id"] for x in kpi.order_list(session, p, sort="s5", desc=False)["rows"]]
+    assert asc[:2] == ["3", "1"]
+    assert [x["delivery_id"] for x in kpi.order_list(session, p, sort="total")["rows"]][0] == "5"
+    # 알 수 없는 정렬 키는 기본 정렬(접수 역순) 유지
+    assert ([x["delivery_id"] for x in kpi.order_list(session, p, sort="nope")["rows"]]
+            == [x["delivery_id"] for x in kpi.order_list(session, p)["rows"]])
+
+
 def test_order_note_endpoint_test_order_excluded_from_kpi(session):
     from fastapi.testclient import TestClient
 

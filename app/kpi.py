@@ -115,6 +115,14 @@ def _min(sec):
     return None if sec is None else round(sec / 60, 1)
 
 
+def _tail_sec(o: RawOrder):
+    """배달완료 직전 구간(초). 로봇 건은 로봇배송완료→완료, 일반 건은 픽업완료→완료."""
+    prev = o.robot_finish_dt if o.delivery_type == ROBOT else o.pickup_dt
+    if prev is None or o.finish_dt is None:
+        return None
+    return (o.finish_dt - prev).total_seconds()
+
+
 def _pickup_to_finish(o: RawOrder):
     if o.s_order_finish is None or o.s_order_pickup is None:
         return None
@@ -219,21 +227,21 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     clean = [v for v in total_secs if v is not None]
 
     seg_robot = {
-        "접수→배차": _min(_mean([o.s_order_dispatch for o in robots])),
-        "배차→픽업완료": _min(_mean([o.s_dispatch_pickup for o in robots])),
-        "픽업완료→적재함닫힘": _min(_mean([o.s_pickup_dockclose for o in robots])),
-        "적재함닫힘→로봇배송완료": _min(_mean([o.s_dockclose_robotfinish for o in robots])),
-        "픽업→완료": None,
+        "①접수→배차": _min(_mean([o.s_order_dispatch for o in robots])),
+        "②배차→픽업완료": _min(_mean([o.s_dispatch_pickup for o in robots])),
+        "③픽업완료→적재함닫힘": _min(_mean([o.s_pickup_dockclose for o in robots])),
+        "④적재함닫힘→로봇배송완료": _min(_mean([o.s_dockclose_robotfinish for o in robots])),
+        "⑤배달완료까지": _min(_mean([_tail_sec(o) for o in robots])),
     }
     seg_general = {
-        "접수→배차": _min(_mean([o.s_order_dispatch for o in general])),
-        "배차→픽업완료": _min(_mean([o.s_dispatch_pickup for o in general])),
-        "픽업완료→적재함닫힘": None,
-        "적재함닫힘→로봇배송완료": None,
-        "픽업→완료": _min(_mean([_pickup_to_finish(o) for o in general])),
+        "①접수→배차": _min(_mean([o.s_order_dispatch for o in general])),
+        "②배차→픽업완료": _min(_mean([o.s_dispatch_pickup for o in general])),
+        "③픽업완료→적재함닫힘": None,
+        "④적재함닫힘→로봇배송완료": None,
+        "⑤배달완료까지": _min(_mean([_tail_sec(o) for o in general])),
     }
 
-    def seg_row(lst, robot_only=False):
+    def seg_row(lst, robot_only=False, mixed=False):
         avg = lambda f: _min(_mean([f(o) for o in lst]))
         return {
             "n": len(lst),
@@ -241,10 +249,13 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
             "dispatch_pickup": avg(lambda o: o.s_dispatch_pickup),
             "pickup_dock": avg(lambda o: o.s_pickup_dockclose) if robot_only else None,
             "dock_finish": avg(lambda o: o.s_dockclose_robotfinish) if robot_only else None,
+            # ⑤는 로봇/일반의 기준 시점이 달라(로봇배송완료 vs 픽업완료) 섞인 모수에서는 내지 않는다
+            "tail": None if mixed else avg(_tail_sec),
             "total": avg(lambda o: o.s_order_finish),
             "pickup_finish": avg(_pickup_to_finish),
         }
-    seg_cmp = {"all": seg_row(timed), "general": seg_row(general), "robot": seg_row(robots, True)}
+    seg_cmp = {"all": seg_row(timed, mixed=True), "general": seg_row(general),
+               "robot": seg_row(robots, True)}
 
     return {
         "seg_cmp": seg_cmp,
@@ -499,8 +510,34 @@ def row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
 MISS_REASONS = ["시스템 오류(로봇 매칭 실패)", "테스트 주문", "로봇 운영 외(점검·미운영)", "상점 미동의", "기타"]
 PER_PAGE = 100
 
+# 구간 분해 (키, 헤더, 설명). ①②⑤는 모든 건, ③④는 로봇 건에만 값이 있다.
+# ⑤는 Redash 집계 컬럼이 없어 타임스탬프에서 파생한다(_tail_sec).
+SEG_COLS = [
+    ("s1", "①배차", "접수→라이더 배차"),
+    ("s2", "②픽업", "라이더 배차→픽업완료 (상점 조리 대기 포함)"),
+    ("s3", "③적재", "픽업완료→도킹존 적재함닫힘 (로봇 건만)"),
+    ("s4", "④로봇", "적재함닫힘→로봇배송완료 (로봇 건만). 7분 초과 시 ▲"),
+    ("s5", "⑤완료", "배달완료까지 남은 구간. 로봇 건은 로봇배송완료 이후(완료 처리), "
+                   "일반 건은 픽업완료 이후(라이더가 고객에게 전달)"),
+]
+SEG_KEYS = [k for k, _, _ in SEG_COLS]
+SEG_NAMES = {k: lab for k, lab, _ in SEG_COLS}
+
+
+def _sort_rows(rows, sort: str | None, desc: bool):
+    """시간 열 정렬. 값 없는 건(None)은 방향과 무관하게 항상 뒤로 보낸다."""
+    if sort != "total" and sort not in SEG_KEYS:
+        return rows                                   # 기본 정렬(접수 역순) 유지
+    val = (lambda r: r["total_min"]) if sort == "total" else (lambda r: r["segs"][sort])
+    sign = -1 if desc else 1
+    return sorted(rows, key=lambda r: (val(r) is None, sign * (val(r) or 0)))
+
 
 def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
+    segs = {"s1": _min(o.s_order_dispatch), "s2": _min(o.s_dispatch_pickup),
+            "s3": _min(o.s_pickup_dockclose), "s4": _min(o.s_dockclose_robotfinish),
+            "s5": _min(_tail_sec(o))}
+    longest = max((k for k in SEG_KEYS if segs[k] is not None), key=lambda k: segs[k], default=None)
     return {
         "delivery_id": o.delivery_id, "order_id": o.order_id, "ord_dt": o.ord_dt,
         "delivery_type": o.delivery_type, "is_robot": o.delivery_type == ROBOT,
@@ -509,6 +546,7 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "total_min": _min(o.s_order_finish), "dispatch_count": o.dispatch_count,
         "hand_min": _min(o.s_dockclose_robotfinish),
         "late": (o.s_dockclose_robotfinish is not None and o.s_dockclose_robotfinish > CFG["timely_threshold_sec"]),
+        "segs": segs, "longest": longest,
         "in_scope": o.store_type in CFG["store_types"],
         "miss_reason": (n.miss_reason if n and n.miss_reason else ""),
         "note": (n.note if n and n.note else ""),
@@ -518,7 +556,8 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
 
 
 def order_list(session, p: Period, flt: str | None = None, st: str | None = None,
-               q: str | None = None, page: int = 1) -> dict:
+               q: str | None = None, page: int = 1,
+               sort: str | None = None, desc: bool = True) -> dict:
     if p.eff_end < p.start:
         return {"rows": [], "total": 0, "pages": 1, "page": 1, "counts": {}}
     lo, hi = _bounds(p.start, p.eff_end)
@@ -554,6 +593,7 @@ def order_list(session, p: Period, flt: str | None = None, st: str | None = None
         rows = [r for r in rows if r["miss_reason"] or r["note"] or r["exclude"]]
     elif flt == "excluded":
         rows = [r for r in rows if r["exclude"]]
+    rows = _sort_rows(rows, sort, desc)
     total = len(rows)
     pages = max((total + PER_PAGE - 1) // PER_PAGE, 1)
     page = min(max(page, 1), pages)
