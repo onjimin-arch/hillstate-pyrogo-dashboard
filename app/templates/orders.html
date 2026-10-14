@@ -18,7 +18,8 @@
   <b>①접수→배차</b> · <b>②배차→픽업완료</b>(상점 조리 대기 포함) · <b>③픽업완료→적재함닫힘</b> · <b>④적재함닫힘→로봇배송완료</b>(7분 초과 시 ▲) ·
   <b>⑤배달완료까지</b>(로봇 건은 로봇배송완료 이후 완료 처리, 일반 건은 픽업완료 이후 라이더 전달).
   ③④는 로봇 건에만 값이 있어 일반 건은 "-"이고, ①②는 로봇·일반 모두 있어 <b>앞단 비교</b>에 쓸 수 있습니다.
-  가장 오래 걸린 구간은 <b>노란색</b>으로 칠하고 <b>최장 구간</b> 열에 적습니다. 열 제목을 누르면 그 구간 기준으로 정렬됩니다(값 없는 건은 항상 뒤).
+  그 건에서 가장 오래 걸린 구간은 <b>최장 구간</b> 열에 적습니다. 열 제목을 누르면 그 구간 기준으로 정렬됩니다(값 없는 건은 항상 뒤).
+  <b>노란색</b>은 같은 구간·같은 배송 유형의 기간 <b>중앙값</b>보다 <b>{{ '%g' | format(flag_ratio) }}배 이상</b>이면서 <b>{{ '%g' | format(flag_min) }}분 이상</b>인 칸입니다 — 그 건에서 유독 튄 구간이라는 뜻입니다(표 아래 기준값 참고).
   배차횟수가 2 이상인 <b>재배차</b> 건은 ①이 어느 배차 시점 기준인지에 따라 해석이 달라지니 주의하세요.
 </p>
 <div class="controls">
@@ -62,13 +63,24 @@
     {% for k, lab, tip in segs %}{{ sth(k, lab, tip) }}{% endfor %}
   </tr>
   </thead>
-  <tbody>
+  <tbody hx-vals='{"p_grain": "{{ p.grain }}", "p_d": "{{ p.start }}", "p_start": "{{ p.start }}", "p_end": "{{ p.end }}"}'>
   {% for r in rows %}{% include "_order_row.html" %}{% else %}
   <tr><td colspan="{{ segs | length + 13 }}" class="empty">조건에 맞는 주문이 없습니다.</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+{% if seg_avg %}
+<div class="sub" style="margin:8px 2px 0">
+  강조 기준이 된 <b>{{ p.label }} 구간 중앙값(분)</b> —
+  {% for kind, label in [('robot', '로봇연계'), ('general', '일반')] %}{% set a = seg_avg[kind] %}
+    <b>{{ label }}</b>
+    {%- for k, lab, tip in segs %}{% if a[k][0] is not none %} {{ lab }} {{ a[k][0] | num(1) }}{% endif %}{% endfor %}
+    (n={{ a['s1'][1] }}){{ ' · ' if not loop.last }}
+  {% endfor %}
+  <br>중앙값을 쓰는 이유: 긴 건 몇 개가 평균을 끌어올려 스스로를 기준 아래로 숨기기 때문입니다. 표본이 {{ flag_n }}건 미만인 구간은 기준이 불안정해 칠하지 않습니다.
+</div>
+{% endif %}
 {% if pages > 1 %}
 <div class="pager" style="margin-top:12px">
   {% set base_q = '/orders?' ~ qs ~ (('&flt=' ~ flt) if flt else '') ~ extra_qs %}

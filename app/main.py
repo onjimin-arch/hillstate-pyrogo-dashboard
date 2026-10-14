@@ -198,13 +198,16 @@ def orders(request: Request, grain: str = "day", d: str | None = None,
     ctx.update(res, flt=flt or "", st=st or "", q=q or "", miss_reasons=kpi.MISS_REASONS,
                sort=sort or "", sdir=sdir, sort_qs=sort_qs,
                segs=kpi.SEG_COLS, seg_names=kpi.SEG_NAMES,
+               flag_ratio=kpi.SEG_FLAG_RATIO, flag_min=kpi.SEG_FLAG_MIN_MIN, flag_n=kpi.SEG_FLAG_MIN_N,
                extra_qs=extra + sort_qs, extra_nosort=extra, base_path="/orders")
     return templates.TemplateResponse(request, "orders.html", ctx)
 
 
 @app.post("/orders/{delivery_id}/note", response_class=HTMLResponse)
 def save_order_note(request: Request, delivery_id: str, miss_reason: str = Form(""),
-                    note: str = Form(""), exclude: str | None = Form(None), db=Depends(get_db)):
+                    note: str = Form(""), exclude: str | None = Form(None),
+                    p_grain: str = Form("day"), p_d: str = Form(""),
+                    p_start: str = Form(""), p_end: str = Form(""), db=Depends(get_db)):
     o = db.get(RawOrder, delivery_id)
     if o is None:
         raise HTTPException(404, "주문이 없습니다")
@@ -218,9 +221,12 @@ def save_order_note(request: Request, delivery_id: str, miss_reason: str = Form(
     n.updated_by = current_user(request)
     db.merge(n)
     db.commit()
+    # 강조(hot)는 기간 평균이 기준이라 보고 있던 기간을 함께 받아 다시 계산한다(hx-vals).
+    p = _period_ctx(p_grain, p_d, p_start, p_end)
+    r = kpi.order_row_marked(db, p, delivery_id) or kpi.order_row_view(o, n)
     return templates.TemplateResponse(
         request, "_order_row.html",
-        {"r": kpi.order_row_view(o, n), "miss_reasons": kpi.MISS_REASONS,
+        {"r": r, "miss_reasons": kpi.MISS_REASONS,
          "segs": kpi.SEG_COLS, "seg_names": kpi.SEG_NAMES, "saved": True})
 
 

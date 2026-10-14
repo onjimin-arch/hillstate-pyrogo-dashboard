@@ -10,9 +10,10 @@
   <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
   <td class="num tot">{{ r.total_min | num(1) }}</td>
   {% for k, lab, tip in segs %}
-  <td class="num {{ 'segmax' if r.longest == k }} {{ 'late' if k == 's4' and r.late }}"
+  <td class="num {{ 'hot' if k in r.hot }} {{ 'late' if k == 's4' and r.late }}"
       {% if k == 's5' %}title="{{ '로봇배송완료→배달완료 (완료 처리)' if r.is_robot else '픽업완료→배달완료 (라이더가 고객에게 전달)' }}"{% endif %}>
-    {%- if r.segs[k] is not none %}{{ r.segs[k] | num(1) }}{% if k == 's4' and r.late %} ▲{% endif %}
+    {%- if k == 's5' and r.tail_instant %}<span class="mut" title="로봇배송완료와 배달완료가 같은 시각에 찍힙니다(별도 완료 처리 지연 없음)">동시</span>
+    {%- elif r.segs[k] is not none %}{{ r.segs[k] | num(1) }}{% if k == 's4' and r.late %} ▲{% endif %}
     {%- else %}<span class="mut">-</span>{% endif -%}
   </td>
   {% endfor %}

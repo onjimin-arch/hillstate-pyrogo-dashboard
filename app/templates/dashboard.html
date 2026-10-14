@@ -80,7 +80,7 @@
   <tr{% if key == 'robot' %} style="font-weight:600"{% endif %}>
     <td>{{ label }}</td><td>{{ c.n }}</td>
     <td>{{ c.order_dispatch | num(1) }}</td><td>{{ c.dispatch_pickup | num(1) }}</td>
-    <td>{{ c.pickup_dock | num(1) }}</td><td>{{ c.dock_finish | num(1) }}</td><td>{{ c.tail | num(1) }}</td>
+    <td>{{ c.pickup_dock | num(1) }}</td><td>{{ c.dock_finish | num(1) }}</td><td>{% if c.tail_instant %}<span class="mut" title="로봇배송완료와 배달완료가 같은 시각에 찍힙니다(별도 완료 처리 지연 없음)">동시</span>{% else %}{{ c.tail | num(1) }}{% endif %}</td>
     <td>{{ c.total | num(1) }}</td><td>{{ c.pickup_finish | num(1) }}</td>
   </tr>
   {% endfor %}
@@ -98,6 +98,7 @@
   ①~⑤ 번호는 <a href="/orders?grain={{ p.grain }}{{ '&d=' ~ p.start if p.grain != 'custom' else '&start=' ~ p.start ~ '&end=' ~ p.end }}">전체 주문</a> 표의 구간 열과 같습니다(건별로 쪼개 보려면 그쪽에서).
   일반 건은 적재함 구간(③④)이 없어 "-"입니다.
   <b>⑤배달완료까지</b>는 로봇 건이 로봇배송완료 이후(완료 처리), 일반 건이 픽업완료 이후(라이더가 고객에게 전달)라 기준 시점이 달라 서로 비교하지 않습니다 — 같은 이유로 전체 평균에도 내지 않습니다.
+  로봇 건은 두 시각이 사실상 같이 찍혀 <b>동시</b>로 표시되며, 이때 ①~④만으로 접수→완료 합계가 설명됩니다.
   로봇의 픽업→완료는 적재함 대기·로봇 주행을 포함합니다.
 </div>
 

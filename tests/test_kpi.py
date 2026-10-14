@@ -199,6 +199,58 @@ def test_order_segments_and_sorting(session):
             == [x["delivery_id"] for x in kpi.order_list(session, p)["rows"]])
 
 
+def test_segment_outlier_highlight(session):
+    """강조(hot)는 같은 배송 유형·같은 구간의 중앙값 대비 2배 이상이면서 5분 이상인 칸만."""
+    base = date(2026, 9, 30)
+    # 일반 건 ②를 10분으로 깔아 중앙값을 만들고(표본 하한 5건 충족), 한 건만 길게 둔다
+    for i in range(10, 17):
+        session.add(make_order(i, total=1200, day=30, hour=13))
+    session.commit()
+    for i in range(10, 17):
+        session.get(dbm.RawOrder, str(i)).s_dispatch_pickup = 600          # 10분
+    session.get(dbm.RawOrder, "16").s_dispatch_pickup = 1500               # 25분 = 2.5배
+    session.commit()
+
+    p = kpi.resolve_period("day", base, None, None, today=date(2026, 10, 1))
+    res = kpi.order_list(session, p)
+    by_id = {x["delivery_id"]: x for x in res["rows"]}
+    assert by_id["16"]["hot"] == ["s2"]                      # 2.5배 + 5분 이상 → 강조
+    assert by_id["15"]["hot"] == []                          # 중앙값과 같으면 강조 없음
+    assert res["seg_avg"]["general"]["s2"][0] == 10.0        # 각주에 쓰는 기준값(중앙값)
+
+    # ①배차는 중앙값의 몇 배여도 절대값이 5분 미만이면 칠하지 않는다
+    session.get(dbm.RawOrder, "15").s_order_dispatch = 240    # 4분 (중앙값 0.5분의 8배)
+    session.commit()
+    rows = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
+    assert "s1" not in rows["15"]["hot"]
+    session.get(dbm.RawOrder, "15").s_order_dispatch = 400    # 6.7분 → 강조
+    session.commit()
+    rows = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
+    assert "s1" in rows["15"]["hot"]
+
+
+def test_tail_instant_for_robot_orders(session):
+    """로봇 건은 로봇배송완료·배달완료가 같은 시각에 찍히므로 '동시'로 표기한다."""
+    o = session.get(dbm.RawOrder, "3")
+    o.robot_finish_dt = datetime(2026, 9, 30, 12, 20)
+    o.finish_dt = datetime(2026, 9, 30, 12, 19, 59)     # 1초 역전 — 실데이터에서 관측된 형태
+    o.pickup_dt = datetime(2026, 9, 30, 12, 10)
+    g = session.get(dbm.RawOrder, "1")                  # 일반 건은 같은 조건이어도 '동시' 아님
+    g.pickup_dt = datetime(2026, 9, 30, 12, 10)
+    g.finish_dt = datetime(2026, 9, 30, 12, 10, 1)
+    session.commit()
+
+    p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
+    by_id = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
+    assert by_id["3"]["tail_instant"] and by_id["3"]["segs"]["s5"] == -0.0
+    assert not by_id["1"]["tail_instant"]               # 일반 건 ⑤는 라이더 배송 구간이라 숫자로 본다
+
+    o.finish_dt = datetime(2026, 9, 30, 12, 24)         # 4분 차이면 실제 완료 지연 → 숫자로
+    session.commit()
+    rows = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
+    assert not rows["3"]["tail_instant"] and rows["3"]["segs"]["s5"] == 4.0
+
+
 def test_order_note_endpoint_test_order_excluded_from_kpi(session):
     from fastapi.testclient import TestClient
 
