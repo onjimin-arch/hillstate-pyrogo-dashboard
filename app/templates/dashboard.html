@@ -223,32 +223,37 @@
 <div class="charts">
   <div class="chart-card">
     <h3>주별 평균 접수→완료 (분)</h3>
-    <p class="d">최근 12주 · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>
+    <p class="d">{% if p.grain == 'week' %}선택한 주({{ p.label }})까지 12주 · 큰 점이 선택한 주{% else %}최근 12주{% endif %} · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>
     <canvas id="weekChart"></canvas>
   </div>
   <div class="chart-card">
     <h3>로봇 이용률 (%)</h3>
-    <p class="d">주별 · 로봇연계 ÷ 전체 완료</p>
+    <p class="d">{% if p.grain == 'week' %}선택한 주({{ p.label }})까지 12주 · 큰 점이 선택한 주 · {% else %}주별 · {% endif %}전체_로봇 = 로봇 ÷ 전체 완료, 로드샵_로봇 = 로봇 ÷ (로드샵_라이더+로드샵_로봇)</p>
     <canvas id="usageChart"></canvas>
   </div>
   <div class="chart-card">
     <h3>시간대별 완료 건수</h3>
-    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }} · 접수 시각 기준</p>
+    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }} · 접수 시각 기준 · 집계 제외 건 뺀 값</p>
     {% if heat.hours %}
-    <div class="heat-wrap">
+    <div class="filters" id="heatBtns" style="margin-bottom:10px">
+      {% for c in heat.cats %}<a href="#" role="button" data-cat="{{ c.key }}" class="{{ 'on' if loop.first }}">{{ c.label }} {{ c.total }}</a>{% endfor %}
+    </div>
+    {% for c in heat.cats %}
+    <div class="heat-wrap" data-heat="{{ c.key }}"{% if not loop.first %} hidden{% endif %}>
     <table class="heat">
       <tr><th></th>{% for d in heat.days %}<th>{{ d }}</th>{% endfor %}</tr>
       {% for h in heat.hours %}
-      {% set row = heat.cells[loop.index0] %}
+      {% set row = c.cells[loop.index0] %}
       <tr><th>{{ '%02d' % h }}시</th>
-        {% for c in row %}
-        <td title="{{ heat.days[loop.index0] }} {{ '%02d' % h }}시: {{ c }}건"
-            style="background: {% if c %}rgba(var(--heat), {{ (0.15 + 0.85 * c / heat.max) | round(2) }}){% else %}transparent{% endif %}">{{ c if c else '' }}</td>
+        {% for n in row %}
+        <td title="{{ heat.days[loop.index0] }} {{ '%02d' % h }}시 {{ c.label }}: {{ n }}건"
+            style="background: {% if n %}rgba(var(--heat), {{ (0.15 + 0.85 * n / c.max) | round(2) }}){% else %}transparent{% endif %}">{{ n if n else '' }}</td>
         {% endfor %}
       </tr>
       {% endfor %}
     </table>
     </div>
+    {% endfor %}
     {% else %}<div class="empty">데이터 없음</div>{% endif %}
   </div>
 </div>
@@ -317,11 +322,12 @@
 
   // 3) 주별 평균 배송시간
   var baseLine = D.weekly.labels.map(function () { return D.baseline; });
+  var selR = function (n) { return D.weekly.labels.map(function (_, i) { return i === D.weekly.selected ? n + 3 : n; }); };
   mk('weekChart', {
     type: 'line',
     data: { labels: D.weekly.labels, datasets: [
-      { label: '로봇연계', data: D.weekly.robot_min, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
-      { label: '일반', data: D.weekly.general_min, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: 4, pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '로봇연계', data: D.weekly.robot_min, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '일반', data: D.weekly.general_min, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 },
       { label: 'baseline', data: baseLine, borderColor: ink, borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0 } ] },
     options: Object.assign({}, baseOpt, { scales: { y: { title: { display: true, text: '분' } }, x: { grid: { display: false } } } })
   });
@@ -330,9 +336,20 @@
   mk('usageChart', {
     type: 'line',
     data: { labels: D.weekly.labels, datasets: [
-      { label: '로봇 이용률(%)', data: D.weekly.usage_pct, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 } ] },
-    options: Object.assign({}, baseOpt, { plugins: { legend: { display: false } },
+      { label: '전체_로봇 이용률', data: D.weekly.usage_all_pct, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '로드샵_로봇 이용률', data: D.weekly.usage_loadshop_pct, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 } ] },
+    options: Object.assign({}, baseOpt, {
+      plugins: { tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + (c.raw == null ? '-' : c.raw + '%'); } } } },
       scales: { y: { beginAtZero: true, title: { display: true, text: '%' } }, x: { grid: { display: false } } } })
+  });
+
+  // 5) 시간대별 완료 건수: 구분 버튼
+  var hb = document.getElementById('heatBtns');
+  if (hb) hb.addEventListener('click', function (e) {
+    var a = e.target.closest('a[data-cat]'); if (!a) return;
+    e.preventDefault();
+    hb.querySelectorAll('a').forEach(function (x) { x.classList.toggle('on', x === a); });
+    document.querySelectorAll('[data-heat]').forEach(function (w) { w.hidden = w.getAttribute('data-heat') !== a.getAttribute('data-cat'); });
   });
 })();
 </script>

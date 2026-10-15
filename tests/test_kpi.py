@@ -331,3 +331,21 @@ def test_robot_only_pickup_average(session):
     assert m["avg_pickup_robot_min"] == round(((1000 - 500) + (2000 - 1000)) / 2 / 60, 1)   # total - pickup(total/2)
     assert m["avg_total_min"] != m["avg_total_robot_min"]                                     # 전체 기준은 별도 유지
     assert kpi.compute_metrics([make_order(13)], {})["avg_pickup_robot_min"] is None         # 로봇 건 없으면 None
+
+
+def test_weekly_series_anchor_and_loadshop_usage(session):
+    rows = kpi.scoped_done(session, date(2026, 9, 1), date(2026, 9, 30))
+    notes = kpi.load_notes(session)
+    w = kpi.weekly_series(rows, notes, date(2026, 10, 1), anchor=date(2026, 9, 23))
+    assert w["labels"][-1].startswith("09/21~") and w["selected"] == 11    # 선택한 주(9/21~)가 마지막 점
+    # 9/30 데이터가 있는 주: 로봇 3 / 전체 6, 로드샵 로봇 3 / 로드샵 5 (B2B 1건은 로드샵 분모 제외)
+    w = kpi.weekly_series(rows, notes, date(2026, 10, 1), anchor=date(2026, 9, 30))
+    assert w["usage_all_pct"][-1] == 50.0 and w["usage_loadshop_pct"][-1] == 60.0
+
+
+def test_heatmap_categories_sum_to_total(session):
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    h = kpi.heatmap(rows, date(2026, 9, 30), date(2026, 9, 30))
+    by = {c["key"]: c["total"] for c in h["cats"]}
+    assert by["all"] == len(rows) == by["ls_rider"] + by["b2b_rider"] + by["ls_robot"] + by["b2b_robot"]
+    assert (by["ls_rider"], by["b2b_rider"], by["ls_robot"], by["b2b_robot"]) == (2, 1, 3, 0)
