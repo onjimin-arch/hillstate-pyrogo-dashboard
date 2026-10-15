@@ -116,6 +116,11 @@ input:focus, select:focus, textarea:focus, button:focus-visible, .nav-item:focus
 
 /* ---------- 컨트롤 (기간 · 필터) ---------- */
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 18px; }
+/* 기간 선택 바: 스크롤해도 상단바(56px) 아래에 고정. content 좌우 패딩(20px)까지 채워 뒤 내용이 비치지 않게 한다 */
+@media (min-width: 781px) {
+  .controls.period-bar { position: sticky; top: 56px; z-index: 4; margin: -20px -20px 18px; padding: 12px 20px;
+    background: var(--bg); border-bottom: 1px solid var(--border); }
+}
 .seg { display: inline-flex; background: var(--gray-soft); border-radius: 8px; padding: 3px; gap: 2px; }
 .seg a { padding: 5px 13px; border-radius: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
 .seg a:hover { color: var(--text); }
