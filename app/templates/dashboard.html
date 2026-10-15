@@ -222,13 +222,13 @@
 <div class="group-title">주별 · 시간대별 추이</div>
 <div class="charts">
   <div class="chart-card">
-    <h3>주별 평균 접수→완료 (분)</h3>
-    <p class="d">{% if p.grain == 'week' %}선택한 주({{ p.label }})까지 12주 · 큰 점이 선택한 주{% else %}최근 12주{% endif %} · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>
+    <h3>{{ '일별' if p.grain == 'week' else '주별' }} 평균 접수→완료 (분)</h3>
+    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }} · {{ '일별' if p.grain == 'week' else '주별(월~일, 기간 경계로 자름)' }} · 점선은 {{ cfg.baseline.label }} {{ cfg.baseline.total_min }}분</p>
     <canvas id="weekChart"></canvas>
   </div>
   <div class="chart-card">
     <h3>로봇 이용률 (%)</h3>
-    <p class="d">{% if p.grain == 'week' %}선택한 주({{ p.label }})까지 12주 · 큰 점이 선택한 주 · {% else %}주별 · {% endif %}전체_로봇 = 로봇 ÷ 전체 완료, 로드샵_로봇 = 로봇 ÷ (로드샵_라이더+로드샵_로봇)</p>
+    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }} · {{ '일별' if p.grain == 'week' else '주별' }} · 전체_로봇 = 로봇 ÷ 전체 완료, 로드샵_로봇 = 로봇 ÷ (로드샵_라이더+로드샵_로봇)</p>
     <canvas id="usageChart"></canvas>
   </div>
   <div class="chart-card">
@@ -322,12 +322,11 @@
 
   // 3) 주별 평균 배송시간
   var baseLine = D.weekly.labels.map(function () { return D.baseline; });
-  var selR = function (n) { return D.weekly.labels.map(function (_, i) { return i === D.weekly.selected ? n + 3 : n; }); };
   mk('weekChart', {
     type: 'line',
     data: { labels: D.weekly.labels, datasets: [
-      { label: '로봇연계', data: D.weekly.robot_min, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
-      { label: '일반', data: D.weekly.general_min, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '로봇연계', data: D.weekly.robot_min, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '일반', data: D.weekly.general_min, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: 4, pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 },
       { label: 'baseline', data: baseLine, borderColor: ink, borderDash: [6, 4], borderWidth: 1.5, pointRadius: 0 } ] },
     options: Object.assign({}, baseOpt, { scales: { y: { title: { display: true, text: '분' } }, x: { grid: { display: false } } } })
   });
@@ -336,8 +335,8 @@
   mk('usageChart', {
     type: 'line',
     data: { labels: D.weekly.labels, datasets: [
-      { label: '전체_로봇 이용률', data: D.weekly.usage_all_pct, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
-      { label: '로드샵_로봇 이용률', data: D.weekly.usage_loadshop_pct, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: selR(4), pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 } ] },
+      { label: '전체_로봇 이용률', data: D.weekly.usage_all_pct, borderColor: robot, backgroundColor: robot, borderWidth: 2, pointRadius: 4, pointBackgroundColor: robot, pointBorderColor: surface, spanGaps: true, tension: 0 },
+      { label: '로드샵_로봇 이용률', data: D.weekly.usage_loadshop_pct, borderColor: general, backgroundColor: general, borderWidth: 2, pointRadius: 4, pointBackgroundColor: general, pointBorderColor: surface, spanGaps: true, tension: 0 } ] },
     options: Object.assign({}, baseOpt, {
       plugins: { tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + (c.raw == null ? '-' : c.raw + '%'); } } } },
       scales: { y: { beginAtZero: true, title: { display: true, text: '%' } }, x: { grid: { display: false } } } })

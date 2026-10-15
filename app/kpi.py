@@ -315,6 +315,22 @@ def daily_series(rows, s: date, e: date) -> dict:
             "general": [gen[d] for d in days], "robot": [rob[d] for d in days]}
 
 
+def period_series(rows, notes, s: date, e: date, unit: str) -> dict:
+    """선택 기간 안의 추이 점. unit='day'면 일별, 'week'면 주별(월~일, 기간 경계로 자름). 지표는 표와 같은 compute_metrics."""
+    tbl = daily_table(rows, notes, s, e) if unit == "day" else weekly_table(rows, notes, s, e)
+    out = {"unit": unit, "labels": [], "robot_min": [], "general_min": [], "usage_all_pct": [],
+           "usage_loadshop_pct": [], "n": []}
+    for r in reversed(tbl):                     # 표는 최신이 위 → 차트는 과거→현재
+        m = r["m"]
+        out["labels"].append(f"{r['date']:%m/%d}" if unit == "day" else f"{r['start']:%m/%d}~{r['end']:%m/%d}")
+        out["robot_min"].append(m["avg_total_robot_min"])
+        out["general_min"].append(m["avg_total_general_min"])
+        out["usage_all_pct"].append(m["usage_pct"])
+        out["usage_loadshop_pct"].append(m["usage_loadshop_pct"])
+        out["n"].append(m["completed"])
+    return out
+
+
 def weekly_series(rows, notes, de: date, weeks: int = 12, anchor: date | None = None) -> dict:
     """주별 추이. anchor(선택한 주의 날짜)가 있으면 그 주가 마지막 점이 되고, 없으면 데이터 마지막 주."""
     last = _monday(anchor or de)
@@ -464,14 +480,12 @@ def dashboard(session, p: Period) -> dict:
         ts, te = p.start, p.eff_end
     trend_all = scoped_done(session, ts, te)
     trend_rows = keep(trend_all, notes)
-    # 주 단위는 선택한 주가 마지막 점이 되도록 추이 구간을 맞춘다(그 외 단위는 데이터 마지막 주 기준)
-    anchor = p.start if p.grain == "week" else None
-    last_mon = _monday(anchor or de)
-    long_rows = keep(scoped_done(session, last_mon - timedelta(weeks=11), min(last_mon + timedelta(days=6), de)), notes)
+    # 추이 차트는 선택한 기간만: 주 단위는 그 주의 일별, 월·직접 선택은 기간 안의 주별(경계는 기간으로 자름)
+    period_pts = period_series(trend_all, notes, ts, te, "day" if p.grain == "week" else "week")
     return {
         "metrics": m,
         "daily": daily_series(trend_rows, ts, te),
-        "weekly": weekly_series(long_rows, notes, de, anchor=anchor),
+        "weekly": period_pts,
         "heat": heatmap(trend_rows, ts, te),
         "day_rows": daily_table(trend_all, notes, ts, te),
         "week_rows": weekly_table(trend_all, notes, ts, te) if p.grain in ("month", "custom") else [],

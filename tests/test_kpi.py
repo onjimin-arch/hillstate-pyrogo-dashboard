@@ -349,3 +349,14 @@ def test_heatmap_categories_sum_to_total(session):
     by = {c["key"]: c["total"] for c in h["cats"]}
     assert by["all"] == len(rows) == by["ls_rider"] + by["b2b_rider"] + by["ls_robot"] + by["b2b_robot"]
     assert (by["ls_rider"], by["b2b_rider"], by["ls_robot"], by["b2b_robot"]) == (2, 1, 3, 0)
+
+
+def test_period_series_only_selected_period(session):
+    rows = kpi.scoped_done(session, date(2026, 9, 28), date(2026, 10, 4))
+    notes = kpi.load_notes(session)
+    d = kpi.period_series(rows, notes, date(2026, 9, 28), date(2026, 10, 4), "day")
+    assert d["labels"] == [f"{x:%m/%d}" for x in (date(2026, 9, 28) + kpi.timedelta(days=i) for i in range(7))]
+    i = d["labels"].index("09/30")
+    assert d["usage_all_pct"][i] == 50.0 and d["usage_loadshop_pct"][i] == 60.0
+    w = kpi.period_series(rows, notes, date(2026, 9, 30), date(2026, 10, 4), "week")
+    assert w["labels"] == ["09/30~10/04"]               # 기간 밖 날짜(9/28~29)는 자른다
