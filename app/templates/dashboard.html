@@ -40,21 +40,21 @@
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
-    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th><th>로봇 이용률</th>
+    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>전체 완료</th><th>로드샵_라이더</th><th>B2B_라이더</th><th>로드샵_로봇</th><th>B2B_로봇</th><th>제외</th><th>전체_로봇 이용률</th><th>로드샵_로봇 이용률</th>
     <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}{% set x = r.m %}
   <tr>
     <td>{% if kind == 'day' %}{{ r.date.strftime('%m/%d') }} ({{ '월화수목금토일'[r.date.weekday()] }}){% else %}{{ r.start.strftime('%m/%d') }}~{{ r.end.strftime('%m/%d') }}{% if loop.first and p.in_progress %} <span class="mut">(진행중)</span>{% endif %}{% endif %}</td>
-    <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.robot_done }}</td>
+    <td>{{ x.completed_all }}</td><td>{{ x.loadshop_done }}</td><td>{{ x.b2b_done }}</td><td>{{ x.loadshop_robot_done }}</td><td>{{ x.b2b_robot_done }}</td>
     <td>{{ x.excluded_n or '' }}</td>
-    <td>{{ x.usage_pct | num(1, '%') }}</td>
+    <td>{{ x.usage_pct | num(1, '%') }}</td><td>{{ x.usage_loadshop_pct | num(1, '%') }}</td>
     <td>{{ x.avg_total_min | num(1) }}</td><td>{{ x.avg_total_robot_min | num(1) }}</td>
     <td>{{ x.avg_pickup_min | num(1) }}</td><td>{{ x.avg_pickup_robot_min | num(1) }}</td>
     <td>{{ x.timely_pct | num(1, '%') }}</td><td>{{ x.success_pct | num(1, '%') }}</td>
   </tr>
-  {% else %}<tr><td colspan="13" class="empty">데이터 없음</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="15" class="empty">데이터 없음</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>

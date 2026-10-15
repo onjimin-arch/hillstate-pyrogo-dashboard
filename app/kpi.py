@@ -204,6 +204,9 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     general = [o for o in rows if o.delivery_type != ROBOT]
     loadshop_general = [o for o in general if o.store_type == "일반(로드샵)"]
     b2b_general = [o for o in general if o.store_type == "B2B"]
+    loadshop_robot = [o for o in robots_all if o.store_type == "일반(로드샵)"]
+    b2b_robot = [o for o in robots_all if o.store_type == "B2B"]
+    ls_base = len(loadshop_general) + len(loadshop_robot)
     robots = [o for o in robots_all if not _time_invalid(o, notes)]   # 시간·적시 지표 모수
     timed = general + robots
 
@@ -265,6 +268,9 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "general_done": len(general),
         "loadshop_done": len(loadshop_general),
         "b2b_done": len(b2b_general),
+        "loadshop_robot_done": len(loadshop_robot),
+        "b2b_robot_done": len(b2b_robot),
+        "usage_loadshop_pct": round(len(loadshop_robot) / ls_base * 100, 1) if ls_base else None,
         "usage_pct": round(len(robots_all) / len(rows) * 100, 1) if rows else None,
         "avg_total_min": _min(avg_total),
         "median_total_min": _min(statistics.median(clean)) if clean else None,

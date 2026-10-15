@@ -241,6 +241,8 @@ def test_daily_table_splits_loadshop_b2b_robot(session):
 
     m = day_metrics()
     assert (m["loadshop_done"], m["b2b_done"], m["robot_done"]) == (2, 1, 3)
+    assert m["loadshop_robot_done"] + m["b2b_robot_done"] == m["robot_done"]
+    assert m["usage_loadshop_pct"] == round(m["loadshop_robot_done"] / (m["loadshop_done"] + m["loadshop_robot_done"]) * 100, 1)
     assert m["completed_all"] == 6 and m["excluded_n"] == 0
 
     # 집계제외 건이 생겨도 "완료" 열에서는 빠지지 않는다 (KPI 모수 completed 에서만 빠진다)
@@ -260,9 +262,9 @@ def test_dashboard_renders_b2b_column(session):
     session.commit()
     r = TestClient(app).get("/?grain=week&d=2026-09-30")   # 표는 grain != 'day' 에서만 렌더된다
     assert r.status_code == 200
-    # 표: 합이 왼쪽에서 오른쪽으로 읽히도록 제외가 로봇연계 바로 뒤에 온다
+    # 표: 합이 왼쪽에서 오른쪽으로 읽히도록 제외가 B2B_로봇 바로 뒤에 온다
     head = r.text[r.text.index("일자별 주요 항목"):]
-    assert "<th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th>" in head
+    assert "<th>전체 완료</th><th>로드샵_라이더</th><th>B2B_라이더</th><th>로드샵_로봇</th><th>B2B_로봇</th><th>제외</th><th>전체_로봇 이용률</th><th>로드샵_로봇 이용률</th>" in head
     # 카드: 전체 완료 건수도 제외를 포함해 표와 숫자가 통일된다
     # 제외한 "1" 은 로드샵 건이라 로드샵에서 빠져 제외로 옮겨간다 (6 = 1+1+3+1)
     card = r.text[r.text.index("전체 완료 건수"):r.text.index("로봇 완료 건수")]
