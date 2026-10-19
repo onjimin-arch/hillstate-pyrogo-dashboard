@@ -194,3 +194,144 @@ def test_migrate_adds_consent_columns_to_existing_db(tmp_path):
     assert {"store_id", "store_robot_consent"} <= cols
     with eng.connect() as c:
         assert c.execute(text("SELECT count(*) FROM raw_orders")).scalar() == 1   # 기존 행 보존
+
+
+def test_missing_columns_warns_without_failing_collection(monkeypatch, tmp_path):
+    """필수가 아닌 컬럼이 빠져도 수집은 성공하되, 로그에 누락이 남아야 한다.
+    경고를 fail 행으로 남기면 freshness 의 last_failed 가 켜져 '수집 실패' 로 잘못 보인다."""
+    import pandas as pd
+    from app import collector, db as dbm, kpi
+    from sqlalchemy import select
+
+    SL = dbm.make_session_factory("sqlite://")
+    monkeypatch.setattr(dbm, "SessionLocal", SL)
+    monkeypatch.setattr(dbm, "get_session_factory", lambda: SL)
+    monkeypatch.setattr(collector, "get_session_factory", lambda: SL)
+
+    # 실제로 일어난 모양: 다른 컬럼은 다 있고 동의 컬럼 하나만 빠진 쿼리
+    # (ROW 에는 나중에 추가된 상점ID·상점로봇동의상태가 없으므로 여기서 채워 완전한 행을 만든다)
+    # 접수일시는 오늘로 둔다 — upsert_orders 가 최근 rolling_days 밖의 건을 걸러낸다
+    today_dt = f"{date.today()} 18:00:00"
+    full = {**ROW, "배달ID": "1", "상점ID": "S-1", "상점로봇동의상태": "동의",
+            "상점주문접수일시": today_dt}
+    only_consent_missing = {k: v for k, v in full.items() if k != "상점로봇동의상태"}
+    assert collector.missing_columns(only_consent_missing) == ["상점로봇동의상태"]
+    collector.run_collect(df=pd.DataFrame([only_consent_missing]))
+
+    with SL() as s:
+        logs = list(s.scalars(select(dbm.CollectLog).order_by(dbm.CollectLog.id)))
+        assert [r.status for r in logs] == ["success"]          # fail 행을 만들지 않는다
+        assert "상점로봇동의상태" in logs[-1].message            # 1개만 빠지면 이름이 그대로 보인다
+        assert kpi.freshness(s)["last_failed"] is False         # 수집 실패로 보이면 안 된다
+        assert s.get(dbm.RawOrder, "1").store_robot_consent is None
+
+        collector.run_collect(df=pd.DataFrame([{**full, "배달ID": "2", "상점로봇동의상태": "미응답"}]))
+        assert s.get(dbm.RawOrder, "2").store_robot_consent == "미응답"
+        assert "쿼리에 없는 컬럼" not in list(
+            s.scalars(select(dbm.CollectLog).order_by(dbm.CollectLog.id)))[-1].message
+
+
+@pytest.fixture()
+def mem_db(monkeypatch):
+    """인메모리 DB 로 갈아끼운다(수집 경로가 쓰는 세션 팩토리 전부)."""
+    SL = dbm.make_session_factory("sqlite://")
+    monkeypatch.setattr(dbm, "SessionLocal", SL)
+    monkeypatch.setattr(dbm, "get_session_factory", lambda: SL)
+    monkeypatch.setattr(collector, "get_session_factory", lambda: SL)
+    return SL
+
+
+def _seeded(SL, **over):
+    """동의 컬럼이 없던 시절에 수집된 모양의 행 1건."""
+    o = collector.df_to_orders(pd.DataFrame([{**ROW, "배달ID": "D-1", **over}]))[0]
+    with SL() as s:
+        s.merge(o)
+        s.commit()
+    return o
+
+
+def test_backfill_consent_fills_only_consent_columns(mem_db):
+    """기존 행에 동의상태·상점ID 만 채우고 나머지 컬럼은 그대로 둔다. DB 에 없는 주문은 만들지 않는다."""
+    SL = mem_db
+    _seeded(SL)                       # store_robot_consent / store_id 가 NULL 인 과거 행
+    with SL() as s:
+        before = s.get(dbm.RawOrder, "D-1")
+        assert before.store_robot_consent is None and before.store_id is None
+
+    frame = pd.DataFrame([
+        {"배달ID": "D-1", "상점ID": 7162, "상점로봇동의상태": "동의"},
+        {"배달ID": "D-9", "상점ID": 226701, "상점로봇동의상태": "미응답"},   # DB 에 없는 주문
+    ])
+    st = collector.backfill_consent(date(2026, 10, 1), date(2026, 10, 31),
+                                    fetch=lambda a, b: frame)
+
+    assert (st["matched"], st["updated"], st["not_in_db"]) == (1, 1, 1)
+    with SL() as s:
+        o = s.get(dbm.RawOrder, "D-1")
+        assert (o.store_robot_consent, o.store_id) == ("동의", "7162")
+        assert o.s_order_finish == 1200 and o.delivery_status == "DROP_FINISHED"   # 그대로
+        assert s.get(dbm.RawOrder, "D-9") is None                                  # 새로 안 만든다
+
+
+def test_backfill_consent_dry_run_and_no_collect_log(mem_db):
+    """dry-run 은 건수만 세고 쓰지 않는다. 어느 쪽이든 collect_log 를 건드리지 않아
+    '마지막 수집 시각'이 백필로 갱신되면 안 된다(데이터가 최신인 것처럼 보인다)."""
+    from app import kpi
+    SL = mem_db
+    _seeded(SL)
+    frame = pd.DataFrame([{"배달ID": "D-1", "상점ID": 1, "상점로봇동의상태": "미동의"}])
+
+    st = collector.backfill_consent(date(2026, 10, 1), date(2026, 10, 31),
+                                    dry_run=True, fetch=lambda a, b: frame)
+    assert st["updated"] == 1
+    with SL() as s:
+        assert s.get(dbm.RawOrder, "D-1").store_robot_consent is None   # 저장 안 됨
+        assert kpi.freshness(s)["last_success"] is None                 # 로그 없음
+
+    collector.backfill_consent(date(2026, 10, 1), date(2026, 10, 31), fetch=lambda a, b: frame)
+    with SL() as s:
+        assert s.get(dbm.RawOrder, "D-1").store_robot_consent == "미동의"
+        assert kpi.freshness(s)["last_success"] is None
+
+
+def test_backfill_consent_reports_missing_column(mem_db):
+    """쿼리에 동의 컬럼이 없으면(저장 안 된 쿼리를 가리키는 경우) 조용히 비우지 말고 알려준다."""
+    SL = mem_db
+    _seeded(SL, **{"상점로봇동의상태": "동의"})
+    st = collector.backfill_consent(
+        date(2026, 10, 1), date(2026, 10, 31),
+        fetch=lambda a, b: pd.DataFrame([{"배달ID": "D-1", "상점ID": 1}]))
+    assert st["no_consent_col"] == ["2026-10"] and st["updated"] == 0
+    with SL() as s:
+        assert s.get(dbm.RawOrder, "D-1").store_robot_consent == "동의"   # 기존 값 유지
+
+
+def test_backfill_consent_survives_one_month_failure(mem_db):
+    """한 달 조회가 실패해도 나머지 달은 채운다(스캔 한도·타임아웃)."""
+    SL = mem_db
+    _seeded(SL)
+
+    def fetch(a, b):
+        if a.month == 9:
+            raise collector.CollectError("스캔 한도 초과")
+        return pd.DataFrame([{"배달ID": "D-1", "상점ID": 7162, "상점로봇동의상태": "동의"}])
+
+    st = collector.backfill_consent(date(2026, 9, 1), date(2026, 10, 31), fetch=fetch)
+    assert st["months"] == 2 and len(st["failed"]) == 1 and st["updated"] == 1
+    with SL() as s:
+        assert s.get(dbm.RawOrder, "D-1").store_robot_consent == "동의"
+
+
+def test_consent_fill_by_month(mem_db):
+    """백필 전후 비교에 쓰는 월별 채움 집계."""
+    SL = mem_db
+    with SL() as s:
+        for i, (dt, consent) in enumerate([("2026-09-30 18:00:00", "동의"),
+                                           ("2026-10-01 18:00:00", None),
+                                           ("2026-10-02 18:00:00", "미응답")]):
+            o = collector.df_to_orders(pd.DataFrame([
+                {**ROW, "배달ID": f"X-{i}", "상점주문접수일시": dt,
+                 "상점로봇동의상태": consent}]))[0]
+            s.merge(o)
+        s.commit()
+        assert collector.consent_fill_by_month(s) == [("2026-09", 1, 1), ("2026-10", 2, 1)]

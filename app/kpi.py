@@ -4,10 +4,10 @@ import statistics
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .config import CFG
-from .db import CollectLog, RawOrder, RobotOrderNote
+from .db import CollectLog, RawOrder, RobotOrderNote, RobotTrip
 
 DONE = "DROP_FINISHED"
 ROBOT = "로봇연계"
@@ -111,6 +111,11 @@ def _mean(vals):
     return sum(vals) / len(vals) if vals else None
 
 
+def _med(vals):
+    vals = [v for v in vals if v is not None]
+    return statistics.median(vals) if vals else None
+
+
 def _min(sec):
     return None if sec is None else round(sec / 60, 1)
 
@@ -121,6 +126,16 @@ def _tail_sec(o: RawOrder):
     if prev is None or o.finish_dt is None:
         return None
     return (o.finish_dt - prev).total_seconds()
+
+
+# 로봇 건은 로봇배송완료와 배달완료가 사실상 같은 시각에 찍힌다(관측상 1~2초 차, 역전도 있음).
+# 이 이내면 숫자 대신 '동시'로 표기한다 — "-0.0" 으로 보이는 것도, 0.0(측정됐는데 0분)으로
+# 보이는 것도 구조상 그런 것인지 구분이 안 되기 때문이다.
+TAIL_INSTANT_SEC = 10
+
+
+def _is_instant(sec) -> bool:
+    return sec is not None and abs(sec) <= TAIL_INSTANT_SEC
 
 
 def _pickup_to_finish(o: RawOrder):
@@ -229,23 +244,29 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     avg_pick = _mean(pick_secs)
     clean = [v for v in total_secs if v is not None]
 
+    def _stack(sec):
+        """스택바용 분 환산. 수 초 역전(음수)은 0 으로 눌러 막대가 뒤로 깎이지 않게 한다."""
+        m = _min(sec)
+        return None if m is None else max(m, 0.0)
+
     seg_robot = {
         "①접수→배차": _min(_mean([o.s_order_dispatch for o in robots])),
         "②배차→픽업완료": _min(_mean([o.s_dispatch_pickup for o in robots])),
         "③픽업완료→적재함닫힘": _min(_mean([o.s_pickup_dockclose for o in robots])),
         "④적재함닫힘→로봇배송완료": _min(_mean([o.s_dockclose_robotfinish for o in robots])),
-        "⑤배달완료까지": _min(_mean([_tail_sec(o) for o in robots])),
+        "⑤배달완료까지": _stack(_mean([_tail_sec(o) for o in robots])),
     }
     seg_general = {
         "①접수→배차": _min(_mean([o.s_order_dispatch for o in general])),
         "②배차→픽업완료": _min(_mean([o.s_dispatch_pickup for o in general])),
         "③픽업완료→적재함닫힘": None,
         "④적재함닫힘→로봇배송완료": None,
-        "⑤배달완료까지": _min(_mean([_tail_sec(o) for o in general])),
+        "⑤배달완료까지": _stack(_mean([_tail_sec(o) for o in general])),
     }
 
     def seg_row(lst, robot_only=False, mixed=False):
         avg = lambda f: _min(_mean([f(o) for o in lst]))
+        tail_sec = None if mixed else _mean([_tail_sec(o) for o in lst])
         return {
             "n": len(lst),
             "order_dispatch": avg(lambda o: o.s_order_dispatch),
@@ -253,7 +274,8 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
             "pickup_dock": avg(lambda o: o.s_pickup_dockclose) if robot_only else None,
             "dock_finish": avg(lambda o: o.s_dockclose_robotfinish) if robot_only else None,
             # ⑤는 로봇/일반의 기준 시점이 달라(로봇배송완료 vs 픽업완료) 섞인 모수에서는 내지 않는다
-            "tail": None if mixed else avg(_tail_sec),
+            "tail": _min(tail_sec),
+            "tail_instant": robot_only and _is_instant(tail_sec),
             "total": avg(lambda o: o.s_order_finish),
             "pickup_finish": avg(_pickup_to_finish),
         }
@@ -551,6 +573,61 @@ def row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
     }
 
 
+# ---------------------------------------------------------------- 로봇 복귀·가용률 (뉴빌리티 수기 기록)
+def robot_availability(session, p: Period) -> dict:
+    """배송완료 후 로봇이 도킹존으로 돌아오기까지. Redash 는 로봇배송완료에서 끝나서 이 구간이 없다.
+
+    출처가 수기 기록(분 단위)이라 KPI 원본이 아니라 운영 참고값이다. 중앙값을 주로 쓴다 —
+    복귀는 엘리베이터·경로 혼잡으로 가끔 크게 튀어 평균이 실태를 과장한다.
+    """
+    trips = list(session.scalars(
+        select(RobotTrip).where(RobotTrip.ord_date >= p.start, RobotTrip.ord_date <= p.eff_end,
+                                RobotTrip.status == "완료")))
+    done = [t for t in trips if t.s_cycle is not None]
+    if not done:
+        return {"n": 0, "uploaded_at": _last_upload(session)}
+
+    cyc = [t.s_cycle for t in done]
+    ret = [t.s_return for t in done if t.s_return is not None]
+    wait = [t.s_finish_return_start for t in done if t.s_finish_return_start is not None]
+    after = [t.s_finish_return_start + t.s_return for t in done
+             if t.s_finish_return_start is not None and t.s_return is not None]
+    cyc_med = _med(cyc)
+
+    by_robot = []
+    for rid in sorted({t.robot_id for t in done if t.robot_id}):
+        g = [t for t in done if t.robot_id == rid]
+        by_robot.append({
+            "robot_id": rid, "n": len(g),
+            "hand": _min(_med([t.s_dockclose_finish for t in g if t.s_dockclose_finish is not None])),
+            "wait": _min(_med([t.s_finish_return_start for t in g if t.s_finish_return_start is not None])),
+            "ret": _min(_med([t.s_return for t in g if t.s_return is not None])),
+            "cycle": _min(_med([t.s_cycle for t in g])),
+        })
+
+    return {
+        "n": len(done),
+        "robots": len({t.robot_id for t in done if t.robot_id}),
+        "days": len({t.ord_date for t in done}),
+        "cycle_min": _min(cyc_med),
+        "cycle_max_min": _min(max(cyc)),
+        "wait_min": _min(_med(wait)),
+        "return_min": _min(_med(ret)),
+        "after_min": _min(_med(after)),
+        "after_max_min": _min(max(after)) if after else None,
+        # 1회전 중 배송완료 이후(고객 체감과 무관하게 로봇만 묶여 있는) 비중
+        "after_pct": (round(_med(after) / cyc_med * 100, 1) if after and cyc_med else None),
+        # 이론 처리량: 1회전 점유시간만으로 환산한 상한. 대기·충전·운영시간은 빼지 않았다.
+        "per_hour": (round(3600 / cyc_med, 1) if cyc_med else None),
+        "by_robot": by_robot,
+        "uploaded_at": _last_upload(session),
+    }
+
+
+def _last_upload(session):
+    return session.scalar(select(func.max(RobotTrip.uploaded_at)))
+
+
 # ---------------------------------------------------------------- 전체 주문 (로봇 누락 파악)
 MISS_REASONS = ["시스템 오류(로봇 매칭 실패)", "테스트 주문", "로봇 운영 외(점검·미운영)", "상점 미동의", "기타"]
 PER_PAGE = 100
@@ -568,6 +645,76 @@ SEG_COLS = [
 SEG_KEYS = [k for k, _, _ in SEG_COLS]
 SEG_NAMES = {k: lab for k, lab, _ in SEG_COLS}
 
+# 구간 셀 강조(노란색) 기준. "이 건은 이 구간이 비정상"을 집어내는 용도다.
+# 행 안에서 제일 큰 칸을 칠하면 한 구간이 대부분을 차지할 때 열 전체가 칠해져 정보가 되지 않는다.
+SEG_FLAG_RATIO = 2.0        # 같은 구간·같은 배송 유형의 기간 중앙값 대비 몇 배 이상
+SEG_FLAG_MIN_MIN = 5.0      # 절대값 하한(분). ①배차처럼 평균이 짧은 구간에서 1~2분이 '2배'로 칠해지는 것을 막는다
+SEG_FLAG_MIN_N = 5          # 표본이 이보다 적으면 평균이 불안정해 칠하지 않는다
+
+
+# Redash 가 준 구간 초와, 같이 저장한 타임스탬프의 차이가 이보다 벌어지면 둘 중 하나가 틀린 것이다.
+# 초 단위 반올림·수집 시점 차이를 감안해 1분을 허용한다.
+SEG_MISMATCH_SEC = 60
+
+
+def _seg_bounds(o: RawOrder) -> dict:
+    """구간별 (시작시각, 끝시각, Redash가 준 초). 화면에서 실제 시각을 확인할 수 있게 한다."""
+    tail_from = o.robot_finish_dt if o.delivery_type == ROBOT else o.pickup_dt
+    return {
+        "s1": (o.ord_dt, o.dispatch_dt, o.s_order_dispatch),
+        "s2": (o.dispatch_dt, o.pickup_dt, o.s_dispatch_pickup),
+        "s3": (o.pickup_dt, o.dock_close_dt, o.s_pickup_dockclose),
+        "s4": (o.dock_close_dt, o.robot_finish_dt, o.s_dockclose_robotfinish),
+        "s5": (tail_from, o.finish_dt, _tail_sec(o)),
+    }
+
+
+def _seg_times_and_gaps(o: RawOrder) -> tuple[dict, list[str]]:
+    """구간별 '시작→끝' 표기와, Redash 값이 타임스탬프와 어긋나는 구간 목록."""
+    times, bad = {}, []
+    for k, (a, b, sec) in _seg_bounds(o).items():
+        times[k] = ((a.strftime("%H:%M:%S") if a else "?") + " → "
+                    + (b.strftime("%H:%M:%S") if b else "?"))
+        if a is not None and b is not None and sec is not None:
+            if abs((b - a).total_seconds() - sec) > SEG_MISMATCH_SEC:
+                bad.append(k)
+    return times, bad
+
+
+def _mark_outliers(rows: list[dict]) -> dict:
+    """각 행에 hot(강조할 구간 키 목록)을 달고, 기준이 된 구간별 중앙값을 돌려준다.
+
+    기준을 평균이 아니라 중앙값으로 두는 이유: 긴 건 몇 개가 평균을 끌어올려
+    자기 자신을 기준 아래로 숨긴다(평균 20분이면 34분짜리가 2배에 못 미친다).
+    중앙값은 그 영향을 받지 않아 "대부분의 건 대비 몇 배"가 그대로 나온다.
+
+    기준은 배송 유형(로봇/일반)별로 따로 낸다 — 특히 ⑤는 로봇이 '완료 처리',
+    일반이 '라이더 전달'이라 섞으면 기준이 엉킨다. 취소 건과 집계 제외 건은
+    구간이 잘려 있거나 실적이 아니므로 기준에서 뺀다.
+    """
+    base = {}
+    for is_robot in (True, False):
+        pool = [r for r in rows if r["is_robot"] == is_robot
+                and r["delivery_status"] == DONE and not r["exclude"]]
+        for k in SEG_KEYS:
+            vals = [r["segs"][k] for r in pool if r["segs"][k] is not None]
+            base[(is_robot, k)] = (_med(vals), len(vals))
+    for r in rows:
+        hot = []
+        for k in SEG_KEYS:
+            v = r["segs"][k]
+            mid, n = base[(r["is_robot"], k)]
+            if v is None or mid is None or n < SEG_FLAG_MIN_N:
+                continue
+            # 하한을 함께 걸어 둘 다 만족해야 칠한다. 로봇 ⑤처럼 중앙값이 0 인 구간
+            # (구조상 '동시')에서도 하한만 넘으면 잡히도록 max 로 묶는다.
+            if v >= max(mid * SEG_FLAG_RATIO, SEG_FLAG_MIN_MIN):
+                hot.append(k)
+        r["hot"] = hot
+    # 화면 각주용: 로봇/일반 각각의 구간 중앙값 (표본 수 포함)
+    return {("robot" if ir else "general"): {k: base[(ir, k)] for k in SEG_KEYS}
+            for ir in (True, False)}
+
 
 def _sort_rows(rows, sort: str | None, desc: bool):
     """시간 열 정렬. 값 없는 건(None)은 방향과 무관하게 항상 뒤로 보낸다."""
@@ -583,6 +730,8 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
             "s3": _min(o.s_pickup_dockclose), "s4": _min(o.s_dockclose_robotfinish),
             "s5": _min(_tail_sec(o))}
     longest = max((k for k in SEG_KEYS if segs[k] is not None), key=lambda k: segs[k], default=None)
+    tail_instant = o.delivery_type == ROBOT and _is_instant(_tail_sec(o))
+    seg_times, seg_bad = _seg_times_and_gaps(o)
     return {
         "delivery_id": o.delivery_id, "order_id": o.order_id, "ord_dt": o.ord_dt,
         "delivery_type": o.delivery_type, "is_robot": o.delivery_type == ROBOT,
@@ -591,7 +740,8 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "total_min": _min(o.s_order_finish), "dispatch_count": o.dispatch_count,
         "hand_min": _min(o.s_dockclose_robotfinish),
         "late": (o.s_dockclose_robotfinish is not None and o.s_dockclose_robotfinish > CFG["timely_threshold_sec"]),
-        "segs": segs, "longest": longest,
+        "segs": segs, "longest": longest, "tail_instant": tail_instant, "hot": [],
+        "seg_times": seg_times, "seg_bad": seg_bad,
         "in_scope": o.store_type in CFG["store_types"],
         "miss_reason": (n.miss_reason if n and n.miss_reason else ""),
         "note": (n.note if n and n.note else ""),
@@ -600,17 +750,29 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
     }
 
 
-def order_list(session, p: Period, flt: str | None = None, st: str | None = None,
-               q: str | None = None, page: int = 1,
-               sort: str | None = None, desc: bool = True) -> dict:
-    if p.eff_end < p.start:
-        return {"rows": [], "total": 0, "pages": 1, "page": 1, "counts": {}}
+def _period_rows(session, p: Period) -> tuple[list[dict], dict]:
+    """기간 전체 행 + 구간 평균. 강조 기준은 필터와 무관하게 기간 전체로 고정한다."""
     lo, hi = _bounds(p.start, p.eff_end)
     stmt = (select(RawOrder).where(RawOrder.building == CFG["building"],
                                    RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
             .order_by(RawOrder.ord_dt.desc()))
     notes = load_notes(session)
     rows = [order_row_view(o, notes.get(o.delivery_id)) for o in session.scalars(stmt)]
+    return rows, _mark_outliers(rows)
+
+
+def order_row_marked(session, p: Period, delivery_id: str) -> dict | None:
+    """단건 재렌더용. 강조는 기간 평균이 있어야 정해지므로 같은 기간을 다시 깐다."""
+    rows, _ = _period_rows(session, p)
+    return next((r for r in rows if r["delivery_id"] == delivery_id), None)
+
+
+def order_list(session, p: Period, flt: str | None = None, st: str | None = None,
+               q: str | None = None, page: int = 1,
+               sort: str | None = None, desc: bool = True) -> dict:
+    if p.eff_end < p.start:
+        return {"rows": [], "total": 0, "pages": 1, "page": 1, "counts": {}, "seg_avg": {}}
+    rows, seg_avg = _period_rows(session, p)
     if st == "loadshop":
         rows = [r for r in rows if r["store_type"] == "일반(로드샵)"]
     elif st == "b2b":
@@ -643,4 +805,4 @@ def order_list(session, p: Period, flt: str | None = None, st: str | None = None
     pages = max((total + PER_PAGE - 1) // PER_PAGE, 1)
     page = min(max(page, 1), pages)
     return {"rows": rows[(page - 1) * PER_PAGE: page * PER_PAGE], "total": total,
-            "pages": pages, "page": page, "counts": counts}
+            "pages": pages, "page": page, "counts": counts, "seg_avg": seg_avg}

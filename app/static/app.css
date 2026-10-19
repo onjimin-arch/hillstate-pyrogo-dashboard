@@ -189,8 +189,10 @@ table.list th.num a.sortlink { color: inherit; text-decoration: none; }
 table.list th.num a.sortlink:hover { color: var(--brand); text-decoration: underline; }
 table.list th.num.sorted a.sortlink { color: var(--brand); }
 table.list td.tot { font-weight: 700; }
-table.list td.segmax { background: var(--amber-soft); font-weight: 700; }
-table.list tr.ex td.segmax { background: transparent; }
+table.list td.hot { background: var(--amber-soft); font-weight: 700; color: var(--amber-ink); }
+table.list td.badseg { outline: 1px dashed var(--red-ink); outline-offset: -2px; }
+.badmark { color: var(--red-ink); font-weight: 700; cursor: help; }
+table.list tr.ex td.hot { background: transparent; }
 .mut { color: var(--muted); font-size: 12px; }
 .tablewrap { overflow-x: auto; border-radius: var(--radius); }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; }

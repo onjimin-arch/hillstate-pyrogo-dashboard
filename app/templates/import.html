@@ -7,8 +7,10 @@
 <div class="card" style="margin-bottom:12px">
   <div class="k"><b>Redash 수집 상태</b><span id="c-state" class="badge"></span>
     <button type="button" id="c-go" class="imp-btn">지금 수집</button>
-    <button type="button" id="c-full" class="imp-btn" title="2025-01-01부터 월 단위로 전체 재수집합니다. 수집 전용 테이블만 갱신되고 수기 입력은 유지됩니다.">전체 재수집(백필)</button></div>
+    <button type="button" id="c-full" class="imp-btn" title="2025-01-01부터 월 단위로 전체 재수집합니다. 수집 전용 테이블만 갱신되고 수기 입력은 유지됩니다.">전체 재수집(백필)</button>
+    <button type="button" id="c-consent" class="imp-btn" title="이미 쌓인 주문 전 기간에 상점로봇동의상태만 다시 받아 채웁니다. 시간·상태 등 나머지 값은 그대로 둡니다.">동의상태만 채우기</button></div>
   <div class="sub" id="c-info"></div>
+  <div class="sub" id="c-consent-info"></div>
   <div id="c-err" class="badge err" hidden></div>
   <table class="imp-tbl tbl-l"><thead><tr><th>시각</th><th>결과</th><th>건수</th><th>메시지</th></tr></thead>
     <tbody id="c-rows"></tbody></table>
@@ -19,6 +21,21 @@
     <button type="submit" id="go">가져오기 시작</button>
   </form>
   <div id="msg" class="sub" aria-live="polite"></div>
+</div>
+
+<div class="card" style="margin-bottom:12px">
+  <div class="k"><b>뉴빌리티 로봇 기록 올리기</b></div>
+  <div class="sub" style="margin-bottom:8px">
+    뉴빌리티가 기입하는 시트를 <b>CSV 또는 엑셀</b>로 내려받아 올리면 대시보드의 <b>로봇 복귀·가용률</b>에 반영됩니다.
+    같은 건은 덮어쓰므로 시트를 고쳐 다시 올려도 됩니다. 라이더 직배송 건과 시각이 비어 있는 건은 제외합니다.
+    <b>호수(세대)는 저장하지 않습니다</b> — 개별 배송지라 수집 대상이 아닙니다.
+  </div>
+  <form class="imp-form" hx-post="/admin/trips/upload" hx-encoding="multipart/form-data"
+        hx-target="#trips-msg" hx-swap="innerHTML">
+    <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
+    <button type="submit">올리기</button>
+  </form>
+  <div id="trips-msg" class="sub" aria-live="polite"></div>
 </div>
 
 <div class="card" id="job" hidden>
@@ -95,6 +112,7 @@
     $('c-info').textContent = 'DB raw_orders ' + fmt(j.raw_orders) + '건 · 주기 ' + (j.interval_min || '-') + '분 · 마지막 시작 ' + (j.last_start || '-') +
       (miss.length ? ' · 미설정 환경변수: ' + miss.join(', ') : '');
     var e = $('c-err'); e.hidden = !j.last_error; e.textContent = j.last_error || '';
+    $('c-consent-info').textContent = j.last_consent ? '동의상태 백필: ' + j.last_consent : '';
     var rows = $('c-rows'); rows.textContent = '';
     j.log.forEach(function (r) {
       var tr = document.createElement('tr');
@@ -110,6 +128,12 @@
   $('c-go').addEventListener('click', function () {
     fetch('/admin/collect', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
       if (!r.ok) return r.json().then(function (d) { setMsg('수집 시작 실패: ' + (d.detail || r.status)); });
+    }).then(cPoll);
+  });
+  $('c-consent').addEventListener('click', function () {
+    if (!confirm('이미 쌓인 주문 전 기간에 상점로봇동의상태만 다시 받아 채웁니다. 나머지 값은 그대로 둡니다. 진행할까요?')) return;
+    fetch('/admin/collect/consent', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { setMsg('백필 시작 실패: ' + (d.detail || r.status)); });
     }).then(cPoll);
   });
   $('c-full').addEventListener('click', function () {
