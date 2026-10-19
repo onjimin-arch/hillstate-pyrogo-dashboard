@@ -192,6 +192,7 @@ table.list td.tot { font-weight: 700; }
 table.list td.hot { background: var(--amber-soft); font-weight: 700; color: var(--amber-ink); }
 table.list td.badseg { outline: 1px dashed var(--red-ink); outline-offset: -2px; }
 .badmark { color: var(--red-ink); font-weight: 700; cursor: help; }
+.sub.bad { color: var(--red-ink); font-weight: 600; }
 table.list tr.ex td.hot { background: transparent; }
 .mut { color: var(--muted); font-size: 12px; }
 .tablewrap { overflow-x: auto; border-radius: var(--radius); }

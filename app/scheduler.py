@@ -109,7 +109,10 @@ def trigger(full: bool = False) -> bool:
 
 
 def status() -> dict:
-    return {**STATE, "configured": _configured(), "env": {k: bool(os.getenv(k, "").strip()) for k in REDASH_ENV}}
+    # query_id 는 값 자체를 보여준다 — 비밀이 아니고(쿼리 URL 에 그대로 있다), 수집이 어느
+    # 쿼리를 실행하는지 모르면 "컬럼이 안 온다" 를 화면에서 판단할 수 없다.
+    return {**STATE, "configured": _configured(), "query_id": os.getenv("REDASH_QUERY_ID", "").strip() or None,
+            "env": {k: bool(os.getenv(k, "").strip()) for k in REDASH_ENV}}
 
 
 def _loop(interval_sec: int) -> None:

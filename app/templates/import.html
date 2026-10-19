@@ -11,6 +11,7 @@
     <button type="button" id="c-consent" class="imp-btn" title="이미 쌓인 주문 전 기간에 상점로봇동의상태만 다시 받아 채웁니다. 시간·상태 등 나머지 값은 그대로 둡니다.">동의상태만 채우기</button></div>
   <div class="sub" id="c-info"></div>
   <div class="sub" id="c-consent-info"></div>
+  <div class="sub" id="c-cols"></div>
   <div id="c-err" class="badge err" hidden></div>
   <table class="imp-tbl tbl-l"><thead><tr><th>시각</th><th>결과</th><th>건수</th><th>메시지</th></tr></thead>
     <tbody id="c-rows"></tbody></table>
@@ -113,6 +114,14 @@
       (miss.length ? ' · 미설정 환경변수: ' + miss.join(', ') : '');
     var e = $('c-err'); e.hidden = !j.last_error; e.textContent = j.last_error || '';
     $('c-consent-info').textContent = j.last_consent ? '동의상태 백필: ' + j.last_consent : '';
+    var c = j.cols || {}, cols = $('c-cols');
+    cols.className = 'sub' + (c.missing && c.missing.length ? ' bad' : '');
+    cols.textContent = !c.n ? '' :
+      ('실행 중인 쿼리 ' + (j.query_id || '미설정') + ' · 마지막 응답 컬럼 ' + c.n + '개'
+       + (c.missing.length
+          ? ' · ⚠ 화면이 읽는데 응답에 없는 컬럼: ' + c.missing.join(', ')
+            + ' — Redash 에서 쿼리를 저장했는지, REDASH_QUERY_ID 가 그 쿼리인지 확인하세요'
+          : ' · 읽는 컬럼은 모두 들어옵니다'));
     var rows = $('c-rows'); rows.textContent = '';
     j.log.forEach(function (r) {
       var tr = document.createElement('tr');

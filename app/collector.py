@@ -146,6 +146,22 @@ def backfill_consent(start: date, end: date, dry_run: bool = False, fetch=None) 
     return st
 
 
+def last_response_columns(session) -> dict:
+    """가장 최근 수집 행의 raw_json 으로 Redash 가 실제로 보낸 컬럼을 되짚는다.
+
+    "쿼리는 고쳤는데 화면이 비어 있다" 는 대개 수집이 다른 쿼리를 실행했거나 저장되지 않은
+    경우다. 수집은 필수 7개만 검사하고 나머지는 조용히 NULL 로 넣으므로 로그만 봐서는
+    모른다. 관리자 화면에서 한눈에 보려고 쓴다(scripts/check_columns.py 와 같은 판정).
+    """
+    o = session.scalars(select(RawOrder).where(RawOrder.raw_json.is_not(None))
+                        .order_by(RawOrder.collected_at.desc()).limit(1)).first()
+    if o is None:
+        return {"n": 0, "missing": [], "collected_at": None}
+    cols = list(json.loads(o.raw_json))
+    return {"n": len(cols), "missing": [c for c in ALL_COLS if c not in cols],
+            "collected_at": o.collected_at.strftime("%m-%d %H:%M") if o.collected_at else None}
+
+
 def orders_date_range(session) -> tuple[date | None, date | None]:
     """이미 쌓인 주문의 접수일 범위 = '전체 데이터'. 백필에서 빈 달을 조회하지 않으려고 쓴다."""
     lo, hi = session.execute(select(func.min(RawOrder.ord_dt), func.max(RawOrder.ord_dt))).one()
