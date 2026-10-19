@@ -114,6 +114,23 @@ def build(base: date):
     return out
 
 
+def store_consent(base: date):
+    """상점 동의 명부(가상). 주문이 없는 상점도 섞어 둔다 — 명부 기준 모수가 주문 기준보다
+    넓다는 걸 화면에서 확인하려는 것이다."""
+    rows, states = [], ["동의", "동의", "미동의", "미응답"]
+    for i in range(1, 13):                       # S001~S004 는 주문에도 쓰이는 상점
+        st = states[i % 4]
+        rows.append(dbm.StoreConsent(
+            store_id=f"S{i:03d}", store_name=f"가상상점 {i}호",
+            store_type="일반(로드샵)" if i % 5 else "B2B", manage_agency="self",
+            consent=st,
+            first_response_date=base - timedelta(days=20 + i) if st != "미응답" else None,
+            agreed_at=None, last_changed_date=base - timedelta(days=i) if st != "미응답" else None,
+            changed_after_response="Y" if i % 6 == 0 else "N",
+            collected_at=datetime.now()))
+    return rows
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true", help="기존 DB 유지(사용자 입력 보존)")
@@ -134,6 +151,8 @@ def main():
     with SL() as s:
         for o in orders:
             s.merge(o)
+        for r in store_consent(base):
+            s.merge(r)
         s.commit()
         n = s.query(dbm.RawOrder).count()
     print(f"{DB_PATH} · 주문 {n}건 ({base - timedelta(days=13)} ~ {base})")

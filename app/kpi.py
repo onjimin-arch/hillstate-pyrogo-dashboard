@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import func, select
 
 from .config import CFG
-from .db import CollectLog, RawOrder, RobotOrderNote, RobotTrip
+from .db import CollectLog, RawOrder, RobotOrderNote, RobotTrip, StoreConsent
 
 DONE = "DROP_FINISHED"
 ROBOT = "로봇연계"
@@ -163,22 +163,53 @@ LOADSHOP = "일반(로드샵)"
 CONSENT_OK, CONSENT_NO, CONSENT_NONE = "동의", "미동의", "미응답"
 
 
-def consent_stats(rows: list[RawOrder]) -> dict:
-    """로드샵 상점의 로봇배송 동의 현황. 상점ID 기준(상점 정보 없는 '0' 제외)이며 값은 주문이 가장 늦은 건 기준.
-    store_robot_consent 가 전부 NULL(컬럼 추가 전 수집분)이면 비율은 None."""
+def consent_stats(rows: list[RawOrder], by_store: dict[str, str] | None = None) -> dict:
+    """이 기간 이 단지에 주문이 있었던 로드샵 상점의 동의 현황. 상점ID 기준('0' = 상점 정보 없음 제외).
+
+    주문 행의 값(store_robot_consent)을 먼저 쓰고, 비어 있으면 상점 명부(store_consent)로 메운다
+    — 동의 컬럼이 쿼리에 추가되기 전 수집분이 NULL 이라 과거 기간이 통째로 비어 보이던 것을 막는다.
+    양쪽 다 없으면 비율은 None.
+    """
+    by_store = by_store or {}
     shop = {}
-    orders = [o for o in rows if o.store_type == LOADSHOP and o.store_robot_consent]
+    orders = [o for o in rows
+              if o.store_type == LOADSHOP and (o.store_robot_consent or by_store.get(o.store_id or ""))]
     for o in sorted(orders, key=lambda o: o.ord_dt):
         if o.store_id and o.store_id != "0":
-            shop[o.store_id] = o.store_robot_consent
+            shop[o.store_id] = o.store_robot_consent or by_store.get(o.store_id)
     n = {k: sum(1 for v in shop.values() if v == k) for k in (CONSENT_OK, CONSENT_NO, CONSENT_NONE)}
-    ok_orders = sum(1 for o in orders if o.store_robot_consent == CONSENT_OK)
+    ok_orders = sum(1 for o in orders
+                    if (o.store_robot_consent or by_store.get(o.store_id or "")) == CONSENT_OK)
     return {
         "consent_shops": n[CONSENT_OK], "noconsent_shops": n[CONSENT_NO], "noresp_shops": n[CONSENT_NONE],
         "consent_shop_base": len(shop),
         "consent_shop_pct": round(n[CONSENT_OK] / len(shop) * 100, 1) if shop else None,
         "consent_order_n": ok_orders, "consent_order_base": len(orders),
         "consent_order_pct": round(ok_orders / len(orders) * 100, 1) if orders else None,
+    }
+
+
+def consent_by_store(session) -> dict[str, str]:
+    """상점ID → 현재 동의상태(상점 명부). 명부가 비어 있으면 빈 dict 라 기존 집계 그대로 돈다."""
+    return {r.store_id: r.consent for r in session.scalars(select(StoreConsent)) if r.consent}
+
+
+def area_consent_stats(session) -> dict:
+    """상점 명부 기준 동의 현황. 모수가 '수원시 승인 로드샵 전체 + 이 건물에 주문이 있던 상점' 이라
+    주문이 없는 상점까지 들어간다 — 주문 기준(consent_stats)보다 넓고, 영업 진척을 보는 숫자다.
+    두 숫자는 모수가 다르므로 화면에서 서로 섞지 않는다."""
+    rows = [r for r in session.scalars(select(StoreConsent)) if r.store_type == LOADSHOP]
+    if not rows:
+        return {"area_base": 0, "area_updated_at": None}
+    n = {k: sum(1 for r in rows if r.consent == k) for k in (CONSENT_OK, CONSENT_NO, CONSENT_NONE)}
+    return {
+        "area_base": len(rows),
+        "area_consent_shops": n[CONSENT_OK], "area_noconsent_shops": n[CONSENT_NO],
+        "area_noresp_shops": n[CONSENT_NONE],
+        "area_consent_pct": round(n[CONSENT_OK] / len(rows) * 100, 1),
+        # 응답 후 상태를 바꾼 상점 — 철회·번복이 있으면 여기서 먼저 보인다
+        "area_changed_n": sum(1 for r in rows if r.changed_after_response == "Y"),
+        "area_updated_at": max((r.collected_at for r in rows if r.collected_at), default=None),
     }
 
 
@@ -484,6 +515,10 @@ def dashboard(session, p: Period) -> dict:
     notes = load_notes(session)
     rows = scoped_done(session, p.start, p.eff_end)
     m = compute_metrics(rows, notes)            # 내부에서 제외 건 반영
+    # 동의 현황: 주문 기준 집계를 상점 명부로 한 번 보정하고(과거 수집분의 NULL 메우기),
+    # 명부 기준(수원시 전체) 숫자를 따로 붙인다.
+    m.update(consent_stats(rows, consent_by_store(session)))
+    m.update(area_consent_stats(session))
     # 특이사항 카드는 목록과 맞추기 위해 미완료 로봇 건도 포함 (다른 지표는 완료 건 기준 그대로)
     unf = unfinished_robots(session, p.start, p.eff_end)
     m.update(annotation_counts(rows + unf, notes))

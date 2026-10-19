@@ -7,6 +7,7 @@
 - `app/kpi.py` 기간 해석(D-1, 주=월~일) + 지표 집계. 모수=`config.yaml`의 단지+상점구분(`store_types`: 로드샵·B2B)+DROP_FINISHED.
 - `app/main.py` FastAPI. `/` 대시보드, `/robots` 로봇 건 리스트(결과 구분·특이사항·집계 제외 입력).
 - `robot_order_notes`는 웹앱만 쓴다. 수집이 덮어쓰지 않는다.
+- `store_consent` 상점별 동의 현황(`REDASH_CONSENT_QUERY_ID`, 주문과 다른 쿼리). 모수가 **수원시 승인 상점 전체 + 이 건물에 주문이 있던 상점**이라 주문 없는 상점도 들어온다. 주문 기준 동의율(`kpi.consent_stats`)과 명부 기준(`kpi.area_consent_stats`)은 **모수가 달라 섞지 않는다**. 주문 행의 동의값이 비었으면 명부로 메운다. `주문건수`는 조회 기간에 따라 달라지므로 저장하지 않는다.
 - `app/neubility.py` 뉴빌리티 수기 시트(CSV/XLSX) → `robot_trips`. 관리자 업로드(`/admin/trips/upload`)로만 들어오고 수집 배치와 무관하다. **호수(세대)는 저장하지 않는다**(개별 배송지). 동은 보관하되 표본이 동당 2건 수준이라 화면에는 쓰지 않는다. 시트는 분 단위라 Redash 값과 수십 초 어긋나므로 운영 참고값이지 KPI 원본이 아니다.
 - 집계 제외: 로봇 품질(적시·성공률)·로봇 평균 시간에서만 제외, 건수·이용률은 유지.
 

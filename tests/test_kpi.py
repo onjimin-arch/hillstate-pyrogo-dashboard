@@ -439,3 +439,56 @@ def test_period_series_only_selected_period(session):
     assert d["usage_all_pct"][i] == 50.0 and d["usage_loadshop_pct"][i] == 60.0
     w = kpi.period_series(rows, notes, date(2026, 9, 30), date(2026, 10, 4), "week")
     assert w["labels"] == ["09/30~10/04"]               # 기간 밖 날짜(9/28~29)는 자른다
+
+
+# ---------------------------------------------------------------- 상점 동의 명부(별도 쿼리)
+def _roster(store_id, consent, store_type="일반(로드샵)", changed=None):
+    from datetime import datetime as _dt
+    return dbm.StoreConsent(store_id=store_id, consent=consent, store_type=store_type,
+                            changed_after_response=changed, collected_at=_dt(2026, 10, 19, 18, 0))
+
+
+def test_area_consent_counts_stores_without_orders(session):
+    """명부 기준 모수는 주문과 무관하다 — 동의했지만 주문이 없는 상점이 빠지면 영업 진척을 못 본다."""
+    for r in [_roster("S1", "동의"), _roster("S2", "동의", changed="Y"), _roster("S3", "미동의"),
+              _roster("S4", "미응답"), _roster("S9", "동의", store_type="B2B")]:
+        session.merge(r)
+    session.commit()
+    a = kpi.area_consent_stats(session)
+    assert a["area_base"] == 4                      # B2B 는 로드샵 기준에서 제외
+    assert (a["area_consent_shops"], a["area_noconsent_shops"], a["area_noresp_shops"]) == (2, 1, 1)
+    assert a["area_consent_pct"] == 50.0 and a["area_changed_n"] == 1
+
+
+def test_area_consent_empty_when_roster_not_collected(session):
+    """명부를 아직 안 받았으면 화면에서 그 줄을 숨길 수 있게 area_base 가 0 이어야 한다."""
+    assert kpi.area_consent_stats(session) == {"area_base": 0, "area_updated_at": None}
+
+
+def test_roster_fills_consent_missing_on_old_orders(session):
+    """동의 컬럼 추가 전 수집분(주문 행의 값이 NULL)도 명부로 메워 집계에 들어간다."""
+    o = make_order(1)
+    o.store_id, o.store_robot_consent = "S1", None       # 과거 수집분
+    rows = [o]
+    assert kpi.consent_stats(rows)["consent_shop_base"] == 0              # 보정 전: 모수 밖
+    c = kpi.consent_stats(rows, {"S1": "동의"})
+    assert c["consent_shop_base"] == 1 and c["consent_shops"] == 1
+    assert (c["consent_order_n"], c["consent_order_base"]) == (1, 1)
+
+    o.store_robot_consent = "미동의"                      # 주문 행에 값이 있으면 그쪽이 우선
+    c = kpi.consent_stats(rows, {"S1": "동의"})
+    assert c["noconsent_shops"] == 1 and c["consent_shops"] == 0
+
+
+def test_consent_by_store_and_dashboard_wiring(session):
+    """대시보드가 명부를 읽어 두 가지 모수를 모두 내려주는지."""
+    session.merge(_roster("S1", "동의"))
+    o = make_order(101, day=28)                      # fixture 가 쓰지 않는 id·날짜
+    o.store_id, o.store_robot_consent = "S1", None   # 동의 컬럼 추가 전 수집분
+    session.add(o)
+    session.commit()
+    assert kpi.consent_by_store(session) == {"S1": "동의"}
+    m = kpi.dashboard(session, kpi.resolve_period("day", date(2026, 9, 28), None, None,
+                                                  today=date(2026, 10, 1)))["metrics"]
+    assert m["consent_shop_base"] == 1 and m["consent_shops"] == 1        # 명부로 보정됨
+    assert m["area_base"] == 1 and m["area_consent_pct"] == 100.0

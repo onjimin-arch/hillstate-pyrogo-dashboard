@@ -33,6 +33,14 @@
     <div class="v">{{ m.consent_shop_pct | num(1) }}<small>%</small></div>
     <div class="sub">동의 {{ m.consent_shops }} · 미동의 {{ m.noconsent_shops }} · 미응답 {{ m.noresp_shops }} / 상점 {{ m.consent_shop_base }}곳</div>
     <div class="sub">동의 상점 주문 {{ m.consent_order_n }} / {{ m.consent_order_base }}건 ({{ m.consent_order_pct | num(1, '%') }})</div>
+    {% if m.area_base %}
+    <div class="sub" style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px"
+         title="모수가 다릅니다. 위는 이 기간 이 단지에 주문이 있었던 상점, 아래는 주문과 무관한 수원시 승인 로드샵 전체(영업 대상)입니다.">
+      <b>수원시 로드샵 전체</b> {{ m.area_consent_pct | num(1, '%') }} —
+      동의 {{ m.area_consent_shops }} · 미동의 {{ m.area_noconsent_shops }} · 미응답 {{ m.area_noresp_shops }} / {{ m.area_base }}곳
+      {%- if m.area_changed_n %} · 응답 후 변경 {{ m.area_changed_n }}곳{% endif %}
+    </div>
+    {% endif %}
   </div>
 </div>
 
