@@ -335,3 +335,66 @@ def test_consent_fill_by_month(mem_db):
             s.merge(o)
         s.commit()
         assert collector.consent_fill_by_month(s) == [("2026-09", 1, 1), ("2026-10", 2, 1)]
+
+
+# ---------------------------------------------------------------- 상점 동의 현황(별도 쿼리)
+CONSENT_ROW = {
+    "storeId": 7162, "name": "가상상점", "상점구분": "일반(로드샵)", "관리주체": "self",
+    "동의여부": "동의", "최초응답일": "2026-09-20", "동의일시": "2026-09-20 14:05",
+    "최종변경일": "2026-10-01", "응답후변경": "Y", "주문건수": 12,
+}
+
+
+def test_df_to_store_consent_maps_columns():
+    """상점ID 는 문자열로, 날짜는 날짜로. 주문건수는 기간 종속이라 저장하지 않는다."""
+    r = collector.df_to_store_consent(pd.DataFrame([CONSENT_ROW]))[0]
+    assert r.store_id == "7162" and r.store_name == "가상상점"
+    assert r.store_type == "일반(로드샵)" and r.consent == "동의"
+    assert r.first_response_date == date(2026, 9, 20) and r.last_changed_date == date(2026, 10, 1)
+    assert r.agreed_at == datetime(2026, 9, 20, 14, 5) and r.changed_after_response == "Y"
+    assert not hasattr(r, "order_count")
+    with pytest.raises(collector.CollectError):          # 필수 컬럼이 없으면 멈춘다
+        collector.df_to_store_consent(pd.DataFrame([{"name": "가상상점"}]))
+
+
+def test_collect_store_consent_skipped_without_query_id(monkeypatch, mem_db):
+    """쿼리 ID 가 없으면 조용히 건너뛴다 — 주문 수집만 쓰는 배포도 그대로 돌아야 한다."""
+    monkeypatch.delenv("REDASH_CONSENT_QUERY_ID", raising=False)
+    called = []
+    assert collector.collect_store_consent(date(2026, 10, 1), date(2026, 10, 7),
+                                           fetch=lambda *a, **k: called.append(1)) == (0, "")
+    assert called == []
+
+
+def test_collect_store_consent_upserts_and_notes_gap(monkeypatch, mem_db):
+    monkeypatch.setenv("REDASH_CONSENT_QUERY_ID", "3535")
+    frame = pd.DataFrame([CONSENT_ROW, {**CONSENT_ROW, "storeId": 99, "동의여부": "미응답"}])
+    n, note = collector.collect_store_consent(date(2026, 10, 1), date(2026, 10, 7),
+                                              fetch=lambda *a, **k: frame)
+    assert n == 2 and note == " · 상점 동의 2곳"
+    with mem_db() as s:
+        assert s.get(dbm.StoreConsent, "99").consent == "미응답"
+
+    # 컬럼이 빠진 응답은 적재는 하되 로그 문구로 알린다
+    thin = pd.DataFrame([{k: v for k, v in CONSENT_ROW.items() if k != "최종변경일"}])
+    _, note = collector.collect_store_consent(date(2026, 10, 1), date(2026, 10, 7),
+                                              fetch=lambda *a, **k: thin)
+    assert "최종변경일" in note
+
+
+def test_run_collect_keeps_going_when_consent_query_fails(monkeypatch, mem_db):
+    """동의 현황은 보조 지표다. 실패해도 주문 수집을 fail 로 떨구면 '수집 실패' 로 잘못 보인다."""
+    from sqlalchemy import select
+
+    from app import kpi
+    monkeypatch.setenv("REDASH_CONSENT_QUERY_ID", "3535")
+    monkeypatch.setattr(collector, "fetch_redash",
+                        lambda *a, **k: (_ for _ in ()).throw(collector.CollectError("권한 없음")))
+    today_dt = f"{date.today()} 18:00:00"
+    collector.run_collect(df=pd.DataFrame([{**ROW, "배달ID": "9", "상점ID": "S-1",
+                                            "상점로봇동의상태": "동의", "상점주문접수일시": today_dt}]))
+    with mem_db() as s:
+        last = list(s.scalars(select(dbm.CollectLog).order_by(dbm.CollectLog.id)))[-1]
+        assert last.status == "success" and "상점 동의 수집 실패" in last.message
+        assert kpi.freshness(s)["last_failed"] is False
+        assert s.get(dbm.RawOrder, "9").store_robot_consent == "동의"      # 주문은 정상 적재

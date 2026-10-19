@@ -117,7 +117,9 @@
     var c = j.cols || {}, cols = $('c-cols');
     cols.className = 'sub' + (c.missing && c.missing.length ? ' bad' : '');
     cols.textContent = !c.n ? '' :
-      ('실행 중인 쿼리 ' + (j.query_id || '미설정') + ' · 마지막 응답 컬럼 ' + c.n + '개'
+      ('실행 중인 쿼리 ' + (j.query_id || '미설정')
+       + ' · 상점 동의 쿼리 ' + (j.consent_query_id || '미설정(동의 현황 수집 안 함)')
+       + ' · 마지막 응답 컬럼 ' + c.n + '개'
        + (c.missing.length
           ? ' · ⚠ 화면이 읽는데 응답에 없는 컬럼: ' + c.missing.join(', ')
             + ' — Redash 에서 쿼리를 저장했는지, REDASH_QUERY_ID 가 그 쿼리인지 확인하세요'

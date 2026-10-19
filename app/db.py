@@ -30,6 +30,19 @@ REQUIRED_COLS = ["배달ID", "건물명", "배송유형", "상점구분", "배�
 # (상점로봇동의상태가 빠진 채 수집돼 화면이 전부 "-" 로 나온 적이 있다). 누락은 수집 로그에 남긴다.
 ALL_COLS = [*STR_COLS, *DT_COLS, *SEC_COLS]
 
+# 상점 동의 현황 쿼리(REDASH_CONSENT_QUERY_ID) 컬럼 → store_consent. 주문 쿼리와 다른 쿼리다.
+# 모수가 '수원시 승인 상점 전체 + 이 건물에 주문이 있던 상점' 이라 주문이 없는 상점도 들어온다.
+CONSENT_STR_COLS = {
+    "storeId": "store_id", "name": "store_name", "상점구분": "store_type",
+    "관리주체": "manage_agency", "동의여부": "consent", "응답후변경": "changed_after_response",
+}
+CONSENT_DATE_COLS = {"최초응답일": "first_response_date", "최종변경일": "last_changed_date"}
+CONSENT_DT_COLS = {"동의일시": "agreed_at"}
+CONSENT_REQUIRED_COLS = ["storeId", "동의여부"]
+# 주문건수는 받아도 저장하지 않는다 — 조회 기간에 따라 달라지는 값이라 테이블에 두면
+# 어느 기간 기준인지 알 수 없게 된다. 기간별 건수는 raw_orders 에서 센다.
+ALL_CONSENT_COLS = [*CONSENT_STR_COLS, *CONSENT_DATE_COLS, *CONSENT_DT_COLS]
+
 
 class Base(DeclarativeBase):
     pass
@@ -106,6 +119,26 @@ class RobotTrip(Base):
     note: Mapped[str | None] = mapped_column(Text)
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime)
     uploaded_by: Mapped[str | None] = mapped_column(String)
+
+
+class StoreConsent(Base):
+    """상점별 로봇배송 동의 현황(상점 단위 명부). 주문 수집과 다른 Redash 쿼리에서 온다.
+
+    raw_orders.store_robot_consent 는 '주문이 있었던 상점'만 커버하지만 여기는 주문이 없는
+    상점도 들어온다 — 동의는 했는데 아직 주문이 없는 상점이 모수에서 빠지지 않게 하려는 것.
+    상태는 현재값이고, 과거 시점 판단은 last_changed_date 로 한다(주문일보다 이르면 그때도 같은 상태).
+    """
+    __tablename__ = "store_consent"
+    store_id: Mapped[str] = mapped_column(String, primary_key=True)
+    store_name: Mapped[str | None] = mapped_column(String)
+    store_type: Mapped[str | None] = mapped_column(String)          # 일반(로드샵) / B2B
+    manage_agency: Mapped[str | None] = mapped_column(String)
+    consent: Mapped[str | None] = mapped_column(String)             # 동의 / 미동의 / 미응답
+    first_response_date: Mapped[date | None] = mapped_column(Date)
+    agreed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_changed_date: Mapped[date | None] = mapped_column(Date)
+    changed_after_response: Mapped[str | None] = mapped_column(String)   # Y / N
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class AppUser(Base):

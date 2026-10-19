@@ -9,8 +9,9 @@ import requests
 from sqlalchemy import func, select
 
 from .config import CFG
-from .db import (ALL_COLS, DT_COLS, REQUIRED_COLS, SEC_COLS, STR_COLS, CollectLog, RawOrder,
-                 get_session_factory)
+from .db import (ALL_CONSENT_COLS, ALL_COLS, CONSENT_DATE_COLS, CONSENT_DT_COLS,
+                 CONSENT_REQUIRED_COLS, CONSENT_STR_COLS, DT_COLS, REQUIRED_COLS, SEC_COLS,
+                 STR_COLS, CollectLog, RawOrder, StoreConsent, get_session_factory)
 
 
 class CollectError(Exception):
@@ -182,6 +183,63 @@ def consent_fill_by_month(session) -> list[tuple[str, int, int]]:
     return [(k, v[0], v[1]) for k, v in sorted(out.items())]
 
 
+# ---------------------------------------------------------------- 상점 동의 현황(별도 쿼리)
+def consent_query_id() -> str | None:
+    """상점 동의 현황 쿼리 ID. 없으면 이 수집은 통째로 건너뛴다(주문 수집과 독립)."""
+    return os.getenv("REDASH_CONSENT_QUERY_ID", "").strip() or None
+
+
+def df_to_store_consent(df: pd.DataFrame) -> list[StoreConsent]:
+    missing = [c for c in CONSENT_REQUIRED_COLS if c not in df.columns]
+    if missing:
+        raise CollectError(f"상점 동의 쿼리 필수 컬럼 누락: {missing}")
+    now = datetime.now()
+    out, seen = [], set()
+    for rec in df.to_dict("records"):
+        sid = _id_str(rec.get("storeId"))
+        if not sid or sid in seen:      # 같은 상점이 두 번 오면 첫 행만(쿼리는 상점당 1행)
+            continue
+        seen.add(sid)
+        r = StoreConsent(store_id=sid, collected_at=now)
+        for k, a in CONSENT_STR_COLS.items():
+            if k != "storeId":
+                setattr(r, a, _id_str(rec.get(k)))
+        for k, a in CONSENT_DATE_COLS.items():
+            v = _clean(rec.get(k))
+            setattr(r, a, pd.to_datetime(v).date() if v is not None else None)
+        for k, a in CONSENT_DT_COLS.items():
+            v = _clean(rec.get(k))
+            setattr(r, a, pd.to_datetime(v).to_pydatetime() if v is not None else None)
+        out.append(r)
+    return out
+
+
+def upsert_store_consent(rows: list[StoreConsent]) -> int:
+    """상점 단위 현재 상태라 통째로 덮어쓴다(지워진 상점은 남지만 수가 적고 무해하다)."""
+    SL = get_session_factory()
+    with SL() as s:
+        for r in rows:
+            s.merge(r)
+        s.commit()
+    return len(rows)
+
+
+def collect_store_consent(start: date, end: date, fetch=None) -> tuple[int, str]:
+    """(적재 건수, 로그에 붙일 문구). 쿼리 ID 가 없으면 (0, "") 로 조용히 건너뛴다."""
+    qid = consent_query_id()
+    if not qid:
+        return 0, ""
+    frame = (fetch or fetch_redash)(start, end, query_id=qid)
+    if frame is None or not len(frame):
+        return 0, " · 상점 동의 0건"
+    n = upsert_store_consent(df_to_store_consent(frame))
+    gap = [c for c in ALL_CONSENT_COLS if c not in frame.columns]
+    note = f" · 상점 동의 {n}곳"
+    if gap:
+        note += f"(⚠ 없는 컬럼 {', '.join(gap)})"
+    return n, note
+
+
 def upsert_orders(orders: list[RawOrder], since: date | None = None) -> int:
     """since가 있으면 접수일 >= since 인 건만 반영(롤링 리플레이)."""
     SL = get_session_factory()
@@ -290,10 +348,19 @@ def run_collect(df: pd.DataFrame | None = None, full: bool = False,
                 raise CollectError("조회 결과 0건")
             orders = df_to_orders(frame)
             n = upsert_orders(orders, since)
+            # 상점 동의 현황은 별도 쿼리다. 실패해도 주문 수집까지 실패로 돌리지 않는다
+            # — 동의 현황은 보조 지표이고, fail 로 남기면 '수집 실패' 로 보인다.
+            # 기간은 짧게(롤링 윈도우) 준다: 상점 모수는 '수원시 승인 상점 전체' 에서 오고
+            # 기간은 '그 기간에 주문이 있던 상점' 을 보탤 뿐이라, 길게 줘도 얻는 건 거의 없고
+            # Redash 스캔량만 매시간 커진다. 전체 백필 경로에서는 돌지 않고 다음 정기 수집이 받는다.
+            try:
+                _, consent_note = collect_store_consent(today - timedelta(days=cfg["rolling_days"]), today)
+            except Exception as e:     # noqa: BLE001
+                consent_note = f" · ⚠ 상점 동의 수집 실패: {str(e)[:80]}"
             # 누락 컬럼은 성공 로그에 함께 남긴다. 별도 fail 행으로 남기면 kpi.freshness 의
             # last_failed 가 켜져 "수집 실패" 로 잘못 보인다.
             log("success", n, f"{'전체' if full else '최근 %d일' % cfg['rolling_days']} upsert"
-                              f"{_gap_note(frame.columns)}")
+                              f"{_gap_note(frame.columns)}{consent_note}")
             return n
         except Exception as e:     # noqa: BLE001 - 배치는 모든 실패를 로그로 남긴다
             last_err = e
