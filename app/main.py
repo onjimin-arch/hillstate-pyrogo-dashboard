@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from html import escape as html_escape
 from starlette.concurrency import run_in_threadpool
 
-from . import ai, importer, kpi, scheduler
+from . import ai, importer, kpi, neubility, scheduler
 from .config import CFG, ROOT
 from sqlalchemy import func, select
 
@@ -171,6 +171,7 @@ def index(request: Request, grain: str = "week", d: str | None = None,
     p = _period_ctx(grain, d, start, end)
     ctx = _common(request, p, db, "dashboard")
     ctx.update(kpi.dashboard(db, p))
+    ctx["avail"] = kpi.robot_availability(db, p)
     return templates.TemplateResponse(request, "dashboard.html", ctx)
 
 
@@ -276,6 +277,29 @@ def import_page(request: Request, db=Depends(get_db), _=Depends(require_import_a
     return templates.TemplateResponse(request, "import.html", ctx)
 
 
+TRIPS_MAX_BYTES = 10 * 1024 * 1024      # 수기 시트는 작다. 큰 파일은 잘못 올린 것으로 본다
+
+
+@app.post("/admin/trips/upload", response_class=HTMLResponse)
+async def upload_trips(request: Request, file: UploadFile = File(...),
+                       db=Depends(get_db), user=Depends(require_import_admin)):
+    """뉴빌리티 수기 시트(CSV/XLSX) 업로드. 행이 적어 백그라운드 없이 바로 처리한다."""
+    blob = await file.read(TRIPS_MAX_BYTES + 1)
+    if len(blob) > TRIPS_MAX_BYTES:
+        raise HTTPException(413, f"파일이 너무 큽니다(최대 {TRIPS_MAX_BYTES // (1024 * 1024)}MB)")
+    if not blob:
+        raise HTTPException(400, "빈 파일입니다")
+    try:
+        trips, stat = neubility.parse(blob)
+    except neubility.SheetError as e:
+        raise HTTPException(400, str(e))
+    n = neubility.upsert(db, trips, user)
+    log.info("robot_trips upload rows=%d by=%s file=%s", n, user, file.filename)
+    return templates.TemplateResponse(request, "_trips_result.html",
+                                      {"request": request, "n": n, "stat": stat,
+                                       "fname": file.filename})
+
+
 @app.get("/admin/import/status")
 def import_status(_=Depends(require_import_admin)):
     return JSONResponse(importer.snapshot() or {"status": "idle"}, headers={"Cache-Control": "no-store"})
@@ -297,6 +321,17 @@ def collect_now(request: Request, full: bool = False, user=Depends(require_impor
     if not scheduler.trigger(full=full):
         raise HTTPException(409, "이미 수집이 진행 중입니다")
     log.info("manual collect by=%s full=%s", user, full)
+    return {"status": "running"}
+
+
+@app.post("/admin/collect/consent", status_code=202)
+def collect_consent(request: Request, user=Depends(require_import_admin)):
+    """이미 쌓인 주문 전 기간에 상점로봇동의상태만 채운다(다른 컬럼은 건드리지 않는다)."""
+    if "x-requested-with" not in request.headers:     # 커스텀 헤더 필수(CSRF 방지)
+        raise HTTPException(400, "잘못된 요청")
+    if not scheduler.trigger_consent():
+        raise HTTPException(409, "이미 수집이 진행 중입니다")
+    log.info("consent backfill by=%s", user)
     return {"status": "running"}
 
 

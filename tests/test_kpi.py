@@ -199,6 +199,33 @@ def test_order_segments_and_sorting(session):
             == [x["delivery_id"] for x in kpi.order_list(session, p)["rows"]])
 
 
+def test_segment_times_and_redash_mismatch(session):
+    """구간 셀에 실제 시각을 싣고, Redash 가 준 초가 타임스탬프와 어긋나면 표시한다."""
+    o = session.get(dbm.RawOrder, "3")
+    o.ord_dt = datetime(2026, 9, 30, 19, 33, 0)
+    o.dispatch_dt = datetime(2026, 9, 30, 19, 50, 30)      # 접수→배차 17.5분
+    o.s_order_dispatch = 1050                              # 17.5분 — 일치
+    o.pickup_dt = datetime(2026, 9, 30, 19, 57, 48)
+    o.s_dispatch_pickup = 438
+    session.commit()
+
+    p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
+    r = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}["3"]
+    assert r["seg_times"]["s1"] == "19:33:00 → 19:50:30"
+    assert r["segs"]["s1"] == 17.5 and r["seg_bad"] == []
+
+    o.s_order_dispatch = 6                                 # Redash 가 0.1분이라고 주면 시각과 어긋난다
+    session.commit()
+    r = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}["3"]
+    assert "s1" in r["seg_bad"]                            # 17분 30초 vs 6초 → 불일치
+    assert r["segs"]["s1"] == 0.1                          # 표시는 Redash 값 그대로(출처를 바꾸지 않는다)
+
+    o.dispatch_dt = None                                   # 시각이 없으면 비교하지 않는다
+    session.commit()
+    r = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}["3"]
+    assert r["seg_bad"] == [] and r["seg_times"]["s1"] == "19:33:00 → ?"
+
+
 def test_segment_outlier_highlight(session):
     """강조(hot)는 같은 배송 유형·같은 구간의 중앙값 대비 2배 이상이면서 5분 이상인 칸만."""
     base = date(2026, 9, 30)

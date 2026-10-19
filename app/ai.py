@@ -224,6 +224,7 @@ DB에 수집된 주문 데이터의 범위는 접수일 기준 {cover}이다.
   ①+②+③+④+⑤ = 접수→완료. ⑤는 로봇·일반의 기준 시점이 달라 둘을 직접 비교하지 않는다.
 - 로봇 적시 배송률 = s_dockclose_robotfinish <= {CFG['timely_threshold_sec']}초(7분) 건수 ÷ 로봇연계 건수 (목표 {CFG['targets']['timely_pct']}%).
 - 8월 baseline: 완료 {CFG['baseline']['orders']}건, 접수→완료 {CFG['baseline']['total_min']}분, 픽업→완료 {CFG['baseline']['pickup_min']}분. PoC 기간: {CFG['poc']['start']} ~ {CFG['poc']['end']}.
+- 로봇 복귀·가용률(robot_trips): 뉴빌리티 수기 시트 업로드분이다. 배송완료→도킹존 복귀완료(s_finish_return_start + s_return), 1회전 점유(s_cycle = 적재함닫힘→복귀완료). Redash 는 로봇배송완료에서 끝나서 이 구간이 없다. 분 단위 수기 기록이라 운영 참고값이며 KPI 원본이 아니다 — 답할 때 출처를 밝힌다. 호수는 저장돼 있지 않다.
 - 날짜 기준은 접수 시각(ord_dt, KST). 주는 월~일.
 
 ## query_sql 용 뷰 (PostgreSQL)

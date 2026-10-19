@@ -1,0 +1,11 @@
+<div class="sub">
+  <b>{{ fname }}</b> — {{ n }}건 적재(같은 건은 덮어씀).
+  읽은 행 {{ stat.total }} ·
+  <span class="mut">제외: 라이더 직배송 {{ stat.skipped_status }} · 빈 행 {{ stat.skipped_empty }} · 시각 없음 {{ stat.skipped_no_time }}</span>
+  {%- if stat.duplicated %} · 중복 {{ stat.duplicated }}{% endif %}
+  <br>기간 {{ stat.date_from }} ~ {{ stat.date_to }}
+  {%- if stat.time_reversed %}
+  <br><span class="badge warn">시각 역전 {{ stat.time_reversed }}건</span>
+  시트에 시각이 순서와 거꾸로 적힌 건입니다. 해당 구간은 값으로 치지 않았으니 뉴빌리티에 수정을 요청하세요.
+  {%- endif %}
+</div>

@@ -102,6 +102,59 @@
   로봇의 픽업→완료는 적재함 대기·로봇 주행을 포함합니다.
 </div>
 
+<div class="group-title">로봇 복귀·가용률<span style="font-weight:400;color:var(--muted)">
+  출처: 뉴빌리티 수기 기록(분 단위) · 운영 참고값이며 KPI 원본이 아닙니다{% if avail.uploaded_at %} · 업로드 {{ avail.uploaded_at | dt }}{% endif %}</span></div>
+{% if avail.n %}
+<div class="cards">
+  <div class="card">
+    <div class="k">1회전 점유시간</div>
+    <div class="v">{{ avail.cycle_min | num(1) }}<small>분</small></div>
+    <div class="delta">적재함닫힘 → 도킹존 복귀완료 (중앙값)</div>
+    <div class="sub">로봇 1대가 한 건에 묶이는 시간 · 최대 {{ avail.cycle_max_min | num(1, '분') }} · n={{ avail.n }}</div>
+  </div>
+  <div class="card">
+    <div class="k">배송완료 후 묶임</div>
+    <div class="v">{{ avail.after_min | num(1) }}<small>분</small></div>
+    <div class="delta">복귀 대기 {{ avail.wait_min | num(1, '분') }} + 복귀 주행 {{ avail.return_min | num(1, '분') }}</div>
+    <div class="sub">고객은 이미 받은 뒤입니다 · 최대 {{ avail.after_max_min | num(1, '분') }}</div>
+  </div>
+  <div class="card">
+    <div class="k">1회전 중 복귀 비중</div>
+    <div class="v">{{ avail.after_pct | num(1) }}<small>%</small></div>
+    <div class="delta">점유시간의 절반 가까이가 배송 후 복귀</div>
+    <div class="sub">여기를 줄이면 같은 대수로 더 많은 건을 칩니다</div>
+  </div>
+  <div class="card">
+    <div class="k">로봇 1대 시간당 처리</div>
+    <div class="v">{{ avail.per_hour | num(1) }}<small>건</small></div>
+    <div class="delta">1회전 점유시간만으로 환산한 <b>이론 상한</b></div>
+    <div class="sub">주문 대기·충전·점검은 빼지 않은 값이라 실제는 이보다 적습니다</div>
+  </div>
+</div>
+<div class="tablewrap" style="margin-top:12px">
+<table class="list">
+  <thead><tr><th>로봇</th><th class="num">건수</th><th class="num">④적재함닫힘<br>→로봇완료</th>
+    <th class="num">완료<br>→복귀시작</th><th class="num">복귀시작<br>→복귀완료</th><th class="num">1회전<br>점유</th></tr></thead>
+  <tbody>
+  {% for r in avail.by_robot %}
+  <tr><td>{{ r.robot_id }}호기</td><td class="num">{{ r.n }}</td><td class="num">{{ r.hand | num(1) }}</td>
+    <td class="num">{{ r.wait | num(1) }}</td><td class="num">{{ r.ret | num(1) }}</td><td class="num tot">{{ r.cycle | num(1) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="sub" style="margin:6px 2px 0">
+  모두 중앙값(분)입니다 — 복귀는 엘리베이터·경로 혼잡으로 가끔 크게 튀어 평균이 실태를 과장합니다.
+  로봇 {{ avail.robots }}대 · {{ avail.days }}일치 기록.
+  ④는 우리 Redash 수집값과 같은 구간이라 대조에 쓸 수 있지만, 시트는 분 단위라 수십 초씩 어긋납니다.
+</div>
+{% else %}
+<div class="card empty">
+  이 기간에 올라온 뉴빌리티 기록이 없습니다.
+  {% if can_import %}<a href="/admin/import">데이터 가져오기</a>에서 시트를 올려주세요.{% else %}관리자에게 업로드를 요청하세요.{% endif %}
+</div>
+{% endif %}
+
 <div class="group-title">배송시간 (평균{{ ', 일 단위는 표본이 작아 변동이 큽니다' if p.grain == 'day' }})</div>
 <div class="cards">
   <div class="card" title="중앙값 {{ m.median_total_min | num(1, '분') }}">

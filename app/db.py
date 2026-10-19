@@ -1,7 +1,7 @@
 import os
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, create_engine
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text, create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -26,6 +26,9 @@ SEC_COLS = {
 }
 REQUIRED_COLS = ["배달ID", "건물명", "배송유형", "상점구분", "배달상태", "상점주문접수일시",
                  "주문접수_배달완료_초"]
+# 수집이 읽는 전체 컬럼. 필수가 아닌 것은 없어도 수집이 돌지만 그만큼 조용히 NULL 이 된다
+# (상점로봇동의상태가 빠진 채 수집돼 화면이 전부 "-" 로 나온 적이 있다). 누락은 수집 로그에 남긴다.
+ALL_COLS = [*STR_COLS, *DT_COLS, *SEC_COLS]
 
 
 class Base(DeclarativeBase):
@@ -77,6 +80,32 @@ class RobotOrderNote(Base):
     exclude_from_kpi: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     updated_by: Mapped[str | None] = mapped_column(String)
+
+
+class RobotTrip(Base):
+    """뉴빌리티 수기 기록(구글 시트) 업로드분. 로봇 복귀·가용률 산출 전용.
+
+    호수(세대)는 저장하지 않는다 — 개별 배송지를 특정하는 값이라 수집 대상이 아니다.
+    동은 구역 단위라 보관하되 화면에는 쓰지 않는다(표본이 동당 2건 수준이라 집계 불가).
+    수집 배치가 아니라 관리자 업로드로만 들어온다.
+    """
+    __tablename__ = "robot_trips"
+    trip_key: Mapped[str] = mapped_column(String, primary_key=True)   # 일자|로봇ID|적재함닫힘시각
+    ord_date: Mapped[date | None] = mapped_column(Date, index=True)
+    robot_id: Mapped[str | None] = mapped_column(String)
+    status: Mapped[str | None] = mapped_column(String)                # 완료 / 라이더_직배송
+    dong: Mapped[str | None] = mapped_column(String)                  # 동만. 호수는 받지 않는다
+    dock_close_dt: Mapped[datetime | None] = mapped_column(DateTime)  # (도킹존) 적재함 닫힘
+    robot_finish_dt: Mapped[datetime | None] = mapped_column(DateTime)  # (세대 앞) 적재함 닫힘 = 로봇배송완료
+    return_start_dt: Mapped[datetime | None] = mapped_column(DateTime)
+    return_done_dt: Mapped[datetime | None] = mapped_column(DateTime)
+    s_dockclose_finish: Mapped[float | None] = mapped_column(Float)   # 우리 ④와 같은 구간(대조용)
+    s_finish_return_start: Mapped[float | None] = mapped_column(Float)  # 배송완료→복귀시작(대기)
+    s_return: Mapped[float | None] = mapped_column(Float)             # 복귀시작→복귀완료
+    s_cycle: Mapped[float | None] = mapped_column(Float)              # 적재함닫힘→복귀완료(1회전 점유)
+    note: Mapped[str | None] = mapped_column(Text)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime)
+    uploaded_by: Mapped[str | None] = mapped_column(String)
 
 
 class AppUser(Base):

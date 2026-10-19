@@ -4,10 +4,10 @@ import statistics
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .config import CFG
-from .db import CollectLog, RawOrder, RobotOrderNote
+from .db import CollectLog, RawOrder, RobotOrderNote, RobotTrip
 
 DONE = "DROP_FINISHED"
 ROBOT = "로봇연계"
@@ -528,6 +528,61 @@ def row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
     }
 
 
+# ---------------------------------------------------------------- 로봇 복귀·가용률 (뉴빌리티 수기 기록)
+def robot_availability(session, p: Period) -> dict:
+    """배송완료 후 로봇이 도킹존으로 돌아오기까지. Redash 는 로봇배송완료에서 끝나서 이 구간이 없다.
+
+    출처가 수기 기록(분 단위)이라 KPI 원본이 아니라 운영 참고값이다. 중앙값을 주로 쓴다 —
+    복귀는 엘리베이터·경로 혼잡으로 가끔 크게 튀어 평균이 실태를 과장한다.
+    """
+    trips = list(session.scalars(
+        select(RobotTrip).where(RobotTrip.ord_date >= p.start, RobotTrip.ord_date <= p.eff_end,
+                                RobotTrip.status == "완료")))
+    done = [t for t in trips if t.s_cycle is not None]
+    if not done:
+        return {"n": 0, "uploaded_at": _last_upload(session)}
+
+    cyc = [t.s_cycle for t in done]
+    ret = [t.s_return for t in done if t.s_return is not None]
+    wait = [t.s_finish_return_start for t in done if t.s_finish_return_start is not None]
+    after = [t.s_finish_return_start + t.s_return for t in done
+             if t.s_finish_return_start is not None and t.s_return is not None]
+    cyc_med = _med(cyc)
+
+    by_robot = []
+    for rid in sorted({t.robot_id for t in done if t.robot_id}):
+        g = [t for t in done if t.robot_id == rid]
+        by_robot.append({
+            "robot_id": rid, "n": len(g),
+            "hand": _min(_med([t.s_dockclose_finish for t in g if t.s_dockclose_finish is not None])),
+            "wait": _min(_med([t.s_finish_return_start for t in g if t.s_finish_return_start is not None])),
+            "ret": _min(_med([t.s_return for t in g if t.s_return is not None])),
+            "cycle": _min(_med([t.s_cycle for t in g])),
+        })
+
+    return {
+        "n": len(done),
+        "robots": len({t.robot_id for t in done if t.robot_id}),
+        "days": len({t.ord_date for t in done}),
+        "cycle_min": _min(cyc_med),
+        "cycle_max_min": _min(max(cyc)),
+        "wait_min": _min(_med(wait)),
+        "return_min": _min(_med(ret)),
+        "after_min": _min(_med(after)),
+        "after_max_min": _min(max(after)) if after else None,
+        # 1회전 중 배송완료 이후(고객 체감과 무관하게 로봇만 묶여 있는) 비중
+        "after_pct": (round(_med(after) / cyc_med * 100, 1) if after and cyc_med else None),
+        # 이론 처리량: 1회전 점유시간만으로 환산한 상한. 대기·충전·운영시간은 빼지 않았다.
+        "per_hour": (round(3600 / cyc_med, 1) if cyc_med else None),
+        "by_robot": by_robot,
+        "uploaded_at": _last_upload(session),
+    }
+
+
+def _last_upload(session):
+    return session.scalar(select(func.max(RobotTrip.uploaded_at)))
+
+
 # ---------------------------------------------------------------- 전체 주문 (로봇 누락 파악)
 MISS_REASONS = ["시스템 오류(로봇 매칭 실패)", "테스트 주문", "로봇 운영 외(점검·미운영)", "상점 미동의", "기타"]
 PER_PAGE = 100
@@ -550,6 +605,35 @@ SEG_NAMES = {k: lab for k, lab, _ in SEG_COLS}
 SEG_FLAG_RATIO = 2.0        # 같은 구간·같은 배송 유형의 기간 중앙값 대비 몇 배 이상
 SEG_FLAG_MIN_MIN = 5.0      # 절대값 하한(분). ①배차처럼 평균이 짧은 구간에서 1~2분이 '2배'로 칠해지는 것을 막는다
 SEG_FLAG_MIN_N = 5          # 표본이 이보다 적으면 평균이 불안정해 칠하지 않는다
+
+
+# Redash 가 준 구간 초와, 같이 저장한 타임스탬프의 차이가 이보다 벌어지면 둘 중 하나가 틀린 것이다.
+# 초 단위 반올림·수집 시점 차이를 감안해 1분을 허용한다.
+SEG_MISMATCH_SEC = 60
+
+
+def _seg_bounds(o: RawOrder) -> dict:
+    """구간별 (시작시각, 끝시각, Redash가 준 초). 화면에서 실제 시각을 확인할 수 있게 한다."""
+    tail_from = o.robot_finish_dt if o.delivery_type == ROBOT else o.pickup_dt
+    return {
+        "s1": (o.ord_dt, o.dispatch_dt, o.s_order_dispatch),
+        "s2": (o.dispatch_dt, o.pickup_dt, o.s_dispatch_pickup),
+        "s3": (o.pickup_dt, o.dock_close_dt, o.s_pickup_dockclose),
+        "s4": (o.dock_close_dt, o.robot_finish_dt, o.s_dockclose_robotfinish),
+        "s5": (tail_from, o.finish_dt, _tail_sec(o)),
+    }
+
+
+def _seg_times_and_gaps(o: RawOrder) -> tuple[dict, list[str]]:
+    """구간별 '시작→끝' 표기와, Redash 값이 타임스탬프와 어긋나는 구간 목록."""
+    times, bad = {}, []
+    for k, (a, b, sec) in _seg_bounds(o).items():
+        times[k] = ((a.strftime("%H:%M:%S") if a else "?") + " → "
+                    + (b.strftime("%H:%M:%S") if b else "?"))
+        if a is not None and b is not None and sec is not None:
+            if abs((b - a).total_seconds() - sec) > SEG_MISMATCH_SEC:
+                bad.append(k)
+    return times, bad
 
 
 def _mark_outliers(rows: list[dict]) -> dict:
@@ -602,6 +686,7 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
             "s5": _min(_tail_sec(o))}
     longest = max((k for k in SEG_KEYS if segs[k] is not None), key=lambda k: segs[k], default=None)
     tail_instant = o.delivery_type == ROBOT and _is_instant(_tail_sec(o))
+    seg_times, seg_bad = _seg_times_and_gaps(o)
     return {
         "delivery_id": o.delivery_id, "order_id": o.order_id, "ord_dt": o.ord_dt,
         "delivery_type": o.delivery_type, "is_robot": o.delivery_type == ROBOT,
@@ -611,6 +696,7 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "hand_min": _min(o.s_dockclose_robotfinish),
         "late": (o.s_dockclose_robotfinish is not None and o.s_dockclose_robotfinish > CFG["timely_threshold_sec"]),
         "segs": segs, "longest": longest, "tail_instant": tail_instant, "hot": [],
+        "seg_times": seg_times, "seg_bad": seg_bad,
         "in_scope": o.store_type in CFG["store_types"],
         "miss_reason": (n.miss_reason if n and n.miss_reason else ""),
         "note": (n.note if n and n.note else ""),

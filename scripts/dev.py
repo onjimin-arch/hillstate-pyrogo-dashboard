@@ -21,9 +21,24 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{DB.as_posix()}")
 os.environ["AUTH_DISABLED"] = "1"   # 로컬 전용. 배포 환경에는 절대 설정하지 않는다.
 os.environ["AUTO_COLLECT"] = "0"    # 로컬에서 Redash 로 나가지 않게
 
+import socket  # noqa: E402
+
 import uvicorn  # noqa: E402
 
+PORT = int(os.getenv("DEV_PORT", "8000"))
+
+
+def _port_taken(port: int) -> bool:
+    with socket.socket() as sk:
+        sk.settimeout(0.5)
+        return sk.connect_ex(("127.0.0.1", port)) == 0
+
+
 if __name__ == "__main__":
-    print("http://127.0.0.1:8000  (Ctrl+C 로 종료)")
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000,
+    # 이미 떠 있는데 또 띄우면, 먼저 뜬 쪽이 포트를 쥔 채 옛 코드를 서빙해 수정이 반영 안 된 것처럼 보인다.
+    if _port_taken(PORT):
+        raise SystemExit(f"{PORT} 포트에 이미 서버가 떠 있습니다. 그쪽을 끄거나(Ctrl+C) "
+                         f"DEV_PORT=8001 python scripts/dev.py 로 다른 포트를 쓰세요.")
+    print(f"http://127.0.0.1:{PORT}  (Ctrl+C 로 종료)")
+    uvicorn.run("app.main:app", host="127.0.0.1", port=PORT,
                 reload=True, reload_dirs=[str(ROOT / "app")], log_level="warning")
