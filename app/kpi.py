@@ -219,6 +219,9 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     general = [o for o in rows if o.delivery_type != ROBOT]
     loadshop_general = [o for o in general if o.store_type == "일반(로드샵)"]
     b2b_general = [o for o in general if o.store_type == "B2B"]
+    loadshop_robot = [o for o in robots_all if o.store_type == "일반(로드샵)"]
+    b2b_robot = [o for o in robots_all if o.store_type == "B2B"]
+    ls_base = len(loadshop_general) + len(loadshop_robot)
     robots = [o for o in robots_all if not _time_invalid(o, notes)]   # 시간·적시 지표 모수
     timed = general + robots
 
@@ -287,6 +290,9 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "general_done": len(general),
         "loadshop_done": len(loadshop_general),
         "b2b_done": len(b2b_general),
+        "loadshop_robot_done": len(loadshop_robot),
+        "b2b_robot_done": len(b2b_robot),
+        "usage_loadshop_pct": round(len(loadshop_robot) / ls_base * 100, 1) if ls_base else None,
         "usage_pct": round(len(robots_all) / len(rows) * 100, 1) if rows else None,
         "avg_total_min": _min(avg_total),
         "median_total_min": _min(statistics.median(clean)) if clean else None,
@@ -331,10 +337,28 @@ def daily_series(rows, s: date, e: date) -> dict:
             "general": [gen[d] for d in days], "robot": [rob[d] for d in days]}
 
 
-def weekly_series(rows, notes, de: date, weeks: int = 12) -> dict:
-    last = _monday(de)
+def period_series(rows, notes, s: date, e: date, unit: str) -> dict:
+    """선택 기간 안의 추이 점. unit='day'면 일별, 'week'면 주별(월~일, 기간 경계로 자름). 지표는 표와 같은 compute_metrics."""
+    tbl = daily_table(rows, notes, s, e) if unit == "day" else weekly_table(rows, notes, s, e)
+    out = {"unit": unit, "labels": [], "robot_min": [], "general_min": [], "usage_all_pct": [],
+           "usage_loadshop_pct": [], "n": []}
+    for r in reversed(tbl):                     # 표는 최신이 위 → 차트는 과거→현재
+        m = r["m"]
+        out["labels"].append(f"{r['date']:%m/%d}" if unit == "day" else f"{r['start']:%m/%d}~{r['end']:%m/%d}")
+        out["robot_min"].append(m["avg_total_robot_min"])
+        out["general_min"].append(m["avg_total_general_min"])
+        out["usage_all_pct"].append(m["usage_pct"])
+        out["usage_loadshop_pct"].append(m["usage_loadshop_pct"])
+        out["n"].append(m["completed"])
+    return out
+
+
+def weekly_series(rows, notes, de: date, weeks: int = 12, anchor: date | None = None) -> dict:
+    """주별 추이. anchor(선택한 주의 날짜)가 있으면 그 주가 마지막 점이 되고, 없으면 데이터 마지막 주."""
+    last = _monday(anchor or de)
     starts = [last - timedelta(weeks=i) for i in range(weeks - 1, -1, -1)]
-    out = {"labels": [], "robot_min": [], "general_min": [], "usage_pct": [], "n": []}
+    out = {"labels": [], "robot_min": [], "general_min": [], "usage_pct": [], "usage_all_pct": [],
+           "usage_loadshop_pct": [], "n": [], "selected": len(starts) - 1}
     for ws in starts:
         we = ws + timedelta(days=6)
         wr = [o for o in rows if ws <= o.ord_dt.date() <= we]
@@ -345,21 +369,41 @@ def weekly_series(rows, notes, de: date, weeks: int = 12) -> dict:
         out["robot_min"].append(_min(_mean([o.s_order_finish for o in rob])))
         out["general_min"].append(_min(_mean([o.s_order_finish for o in gen])))
         out["usage_pct"].append(round(len(rob_all) / len(wr) * 100, 1) if wr else None)
+        out["usage_all_pct"].append(round(len(rob_all) / len(wr) * 100, 1) if wr else None)   # 전체_로봇 이용률
+        ls = [o for o in wr if o.store_type == LOADSHOP]
+        ls_rob = [o for o in ls if o.delivery_type == ROBOT]
+        out["usage_loadshop_pct"].append(round(len(ls_rob) / len(ls) * 100, 1) if ls else None)  # 로드샵_로봇 이용률
         out["n"].append(len(wr))
     return out
 
 
+HEAT_CATS = [
+    ("all", "전체 완료", lambda o: True),
+    ("ls_rider", "로드샵_라이더", lambda o: o.store_type == LOADSHOP and o.delivery_type != ROBOT),
+    ("b2b_rider", "B2B_라이더", lambda o: o.store_type == "B2B" and o.delivery_type != ROBOT),
+    ("ls_robot", "로드샵_로봇", lambda o: o.store_type == LOADSHOP and o.delivery_type == ROBOT),
+    ("b2b_robot", "B2B_로봇", lambda o: o.store_type == "B2B" and o.delivery_type == ROBOT),
+]
+
+
 def heatmap(rows, s: date, e: date) -> dict:
+    """시간대별 완료 건수. 구분(전체·상점구분×배송유형)별 셀을 함께 만든다. 시간 행 범위는 전체 기준으로 고정해
+    버튼으로 구분을 바꿔도 행이 움직이지 않는다."""
     days = list(_days(s, e)) if e >= s else []
-    cnt = {}
-    for o in rows:
-        cnt[(o.ord_dt.date(), o.ord_dt.hour)] = cnt.get((o.ord_dt.date(), o.ord_dt.hour), 0) + 1
-    hours = sorted({h for (_, h) in cnt}) if cnt else []
+    hours = sorted({o.ord_dt.hour for o in rows})
     if hours:
         hours = list(range(min(hours), max(hours) + 1))
-    mx = max(cnt.values()) if cnt else 0
-    return {"days": [f"{d:%m/%d}" for d in days], "hours": hours,
-            "cells": [[cnt.get((d, h), 0) for d in days] for h in hours], "max": mx}
+    cats = []
+    for key, label, pred in HEAT_CATS:
+        cnt = {}
+        for o in rows:
+            if pred(o):
+                k = (o.ord_dt.date(), o.ord_dt.hour)
+                cnt[k] = cnt.get(k, 0) + 1
+        cats.append({"key": key, "label": label, "total": sum(cnt.values()),
+                     "cells": [[cnt.get((d, h), 0) for d in days] for h in hours],
+                     "max": max(cnt.values()) if cnt else 0})
+    return {"days": [f"{d:%m/%d}" for d in days], "hours": hours, "cats": cats}
 
 
 def daily_table(rows, notes, s: date, e: date) -> list[dict]:
@@ -458,11 +502,12 @@ def dashboard(session, p: Period) -> dict:
         ts, te = p.start, p.eff_end
     trend_all = scoped_done(session, ts, te)
     trend_rows = keep(trend_all, notes)
-    long_rows = keep(scoped_done(session, _monday(de) - timedelta(weeks=11), de), notes)
+    # 추이 차트는 선택한 기간만: 주 단위는 그 주의 일별, 월·직접 선택은 기간 안의 주별(경계는 기간으로 자름)
+    period_pts = period_series(trend_all, notes, ts, te, "day" if p.grain == "week" else "week")
     return {
         "metrics": m,
         "daily": daily_series(trend_rows, ts, te),
-        "weekly": weekly_series(long_rows, notes, de),
+        "weekly": period_pts,
         "heat": heatmap(trend_rows, ts, te),
         "day_rows": daily_table(trend_all, notes, ts, te),
         "week_rows": weekly_table(trend_all, notes, ts, te) if p.grain in ("month", "custom") else [],

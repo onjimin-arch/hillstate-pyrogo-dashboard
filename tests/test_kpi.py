@@ -320,6 +320,8 @@ def test_daily_table_splits_loadshop_b2b_robot(session):
 
     m = day_metrics()
     assert (m["loadshop_done"], m["b2b_done"], m["robot_done"]) == (2, 1, 3)
+    assert m["loadshop_robot_done"] + m["b2b_robot_done"] == m["robot_done"]
+    assert m["usage_loadshop_pct"] == round(m["loadshop_robot_done"] / (m["loadshop_done"] + m["loadshop_robot_done"]) * 100, 1)
     assert m["completed_all"] == 6 and m["excluded_n"] == 0
 
     # 집계제외 건이 생겨도 "완료" 열에서는 빠지지 않는다 (KPI 모수 completed 에서만 빠진다)
@@ -339,9 +341,9 @@ def test_dashboard_renders_b2b_column(session):
     session.commit()
     r = TestClient(app).get("/?grain=week&d=2026-09-30")   # 표는 grain != 'day' 에서만 렌더된다
     assert r.status_code == 200
-    # 표: 합이 왼쪽에서 오른쪽으로 읽히도록 제외가 로봇연계 바로 뒤에 온다
+    # 표: 합이 왼쪽에서 오른쪽으로 읽히도록 제외가 B2B_로봇 바로 뒤에 온다
     head = r.text[r.text.index("일자별 주요 항목"):]
-    assert "<th>완료</th><th>일반</th><th>B2B</th><th>로봇연계</th><th>제외</th>" in head
+    assert "<th>전체 완료</th><th>로드샵_라이더</th><th>B2B_라이더</th><th>로드샵_로봇</th><th>B2B_로봇</th><th>제외</th><th>전체_로봇 이용률</th><th>로드샵_로봇 이용률</th>" in head
     # 카드: 전체 완료 건수도 제외를 포함해 표와 숫자가 통일된다
     # 제외한 "1" 은 로드샵 건이라 로드샵에서 빠져 제외로 옮겨간다 (6 = 1+1+3+1)
     card = r.text[r.text.index("전체 완료 건수"):r.text.index("로봇 완료 건수")]
@@ -408,3 +410,32 @@ def test_robot_only_pickup_average(session):
     assert m["avg_pickup_robot_min"] == round(((1000 - 500) + (2000 - 1000)) / 2 / 60, 1)   # total - pickup(total/2)
     assert m["avg_total_min"] != m["avg_total_robot_min"]                                     # 전체 기준은 별도 유지
     assert kpi.compute_metrics([make_order(13)], {})["avg_pickup_robot_min"] is None         # 로봇 건 없으면 None
+
+
+def test_weekly_series_anchor_and_loadshop_usage(session):
+    rows = kpi.scoped_done(session, date(2026, 9, 1), date(2026, 9, 30))
+    notes = kpi.load_notes(session)
+    w = kpi.weekly_series(rows, notes, date(2026, 10, 1), anchor=date(2026, 9, 23))
+    assert w["labels"][-1].startswith("09/21~") and w["selected"] == 11    # 선택한 주(9/21~)가 마지막 점
+    # 9/30 데이터가 있는 주: 로봇 3 / 전체 6, 로드샵 로봇 3 / 로드샵 5 (B2B 1건은 로드샵 분모 제외)
+    w = kpi.weekly_series(rows, notes, date(2026, 10, 1), anchor=date(2026, 9, 30))
+    assert w["usage_all_pct"][-1] == 50.0 and w["usage_loadshop_pct"][-1] == 60.0
+
+
+def test_heatmap_categories_sum_to_total(session):
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    h = kpi.heatmap(rows, date(2026, 9, 30), date(2026, 9, 30))
+    by = {c["key"]: c["total"] for c in h["cats"]}
+    assert by["all"] == len(rows) == by["ls_rider"] + by["b2b_rider"] + by["ls_robot"] + by["b2b_robot"]
+    assert (by["ls_rider"], by["b2b_rider"], by["ls_robot"], by["b2b_robot"]) == (2, 1, 3, 0)
+
+
+def test_period_series_only_selected_period(session):
+    rows = kpi.scoped_done(session, date(2026, 9, 28), date(2026, 10, 4))
+    notes = kpi.load_notes(session)
+    d = kpi.period_series(rows, notes, date(2026, 9, 28), date(2026, 10, 4), "day")
+    assert d["labels"] == [f"{x:%m/%d}" for x in (date(2026, 9, 28) + kpi.timedelta(days=i) for i in range(7))]
+    i = d["labels"].index("09/30")
+    assert d["usage_all_pct"][i] == 50.0 and d["usage_loadshop_pct"][i] == 60.0
+    w = kpi.period_series(rows, notes, date(2026, 9, 30), date(2026, 10, 4), "week")
+    assert w["labels"] == ["09/30~10/04"]               # 기간 밖 날짜(9/28~29)는 자른다

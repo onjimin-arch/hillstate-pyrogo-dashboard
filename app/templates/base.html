@@ -73,7 +73,7 @@
       {% if active in ('dashboard', 'robots', 'orders') %}
       {% set base = base_path or ('/' if active == 'dashboard' else '/robots') %}
       {% set xq = extra_qs or '' %}
-      <div class="controls">
+      <div class="controls period-bar">
         <div class="seg">
           {% for g, name in grains %}
             <a class="{{ 'on' if p.grain == g }}" href="{{ base }}?grain={{ g }}{% if flt %}&flt={{ flt }}{% endif %}{{ xq }}">{{ name }}</a>
