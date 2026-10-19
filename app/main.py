@@ -21,7 +21,7 @@ from fastapi.responses import JSONResponse
 from html import escape as html_escape
 from starlette.concurrency import run_in_threadpool
 
-from . import ai, importer, kpi, neubility, scheduler
+from . import ai, collector, importer, kpi, neubility, scheduler
 from .config import CFG, ROOT
 from sqlalchemy import func, select
 
@@ -309,7 +309,8 @@ def import_status(_=Depends(require_import_admin)):
 def collect_status(db=Depends(get_db), _=Depends(require_import_admin)):
     logs = db.scalars(select(CollectLog).order_by(CollectLog.ts.desc()).limit(10)).all()
     n_orders = db.scalar(select(func.count()).select_from(RawOrder))
-    return JSONResponse({**scheduler.status(), "raw_orders": n_orders, "log": [
+    return JSONResponse({**scheduler.status(), "raw_orders": n_orders,
+                         "cols": collector.last_response_columns(db), "log": [
         {"ts": r.ts.strftime("%m-%d %H:%M:%S"), "status": r.status, "rows": r.rows,
          "message": (r.message or "")[:300]} for r in logs]}, headers={"Cache-Control": "no-store"})
 

@@ -60,3 +60,28 @@ def test_consent_backfill_endpoint(client, monkeypatch):
     msg = client.get("/admin/collect/status", headers=h).json()["last_consent"]
     assert "갱신 18건" in msg and "2026-08-01~2026-10-18" in msg
     assert "동의상태만 채우기" in client.get("/admin/import", headers=h).text
+
+
+def test_status_reports_response_columns(client, monkeypatch):
+    """'쿼리는 고쳤는데 화면이 비어 있다' 를 화면에서 판정할 수 있어야 한다.
+    수집은 필수 컬럼만 검사하므로, 실제로 받은 컬럼을 raw_json 에서 되짚어 보여준다."""
+    import json
+    from datetime import datetime
+
+    from app import collector, db as dbm
+
+    monkeypatch.setenv("REDASH_QUERY_ID", "3531")
+    h = jwt("jmlee@barogo.com")
+    assert client.get("/admin/collect/status", headers=h).json()["cols"]["n"] == 0   # 수집 전
+
+    sent = [c for c in dbm.ALL_COLS if c != "상점로봇동의상태"]       # 동의 컬럼만 빠진 응답
+    SL = dbm.get_session_factory()
+    with SL() as s:
+        s.merge(dbm.RawOrder(delivery_id="D-1", collected_at=datetime.now(),
+                             raw_json=json.dumps({c: "x" for c in sent}, ensure_ascii=False)))
+        s.commit()
+        assert collector.last_response_columns(s)["missing"] == ["상점로봇동의상태"]
+
+    j = client.get("/admin/collect/status", headers=h).json()
+    assert j["query_id"] == "3531"
+    assert j["cols"]["missing"] == ["상점로봇동의상태"] and j["cols"]["n"] == len(sent)

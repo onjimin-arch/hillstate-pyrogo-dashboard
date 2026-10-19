@@ -19,7 +19,7 @@
 - 접근 제어: 전 라우트(`/health`·정적 파일 제외)에 `auth_gate`. x-amzn-oidc-data 이메일이 `app_users` 에 등록(또는 기본 관리자 `jmlee@barogo.com`, 환경변수 `ADMIN_EMAILS` 로 추가)된 경우만 통과. 권한 admin/user, 관리는 `/settings`(관리자 전용). 로그인 헤더가 없으면 401(단, `/` 는 플랫폼 헬스체크용으로 200+안내문만). 로컬 개발은 `AUTH_DISABLED=1`(헤더 없는 요청만 관리자 취급, 배포 환경에는 설정 금지).
 - 레이아웃·디자인: `../UI_UX_디자인_가이드.md` 기준(라이트 단일 테마, 오렌지 브랜드 토큰, 사이드바 240px + 상단바 56px). 색은 `app/static/app.css` 의 `:root` 토큰만 쓰고 차트는 `--s1~s7`. 설정 화면 `/settings`.
 - 데이터 가져오기: `/admin/import` (관리자만). 로컬 SQLite 업로드 → 임시 디스크 파일 → 백그라운드 스레드가 1,000행씩 `ON CONFLICT DO NOTHING` 적재 후 id 시퀀스 보정(`app/importer.py`). 진행 상태는 프로세스 메모리(컨테이너 1개 전제), 임시 파일은 끝나면 삭제. `IMPORT_MAX_MB`(기본 500).
-- 자동 수집: 앱 시작 시 `app/scheduler.py` 스레드가 `COLLECT_INTERVAL_MIN`(기본 60)분마다 수집. 이력이 없으면 첫 실행은 전체 백필. `AUTO_COLLECT=0` 으로 끔(외부 스케줄러 사용 시). REDASH_* 미설정이면 시작 로그에 경고만 남기고 안 돈다.
+- 자동 수집: 앱 시작 시 `app/scheduler.py` 스레드가 `COLLECT_INTERVAL_MIN`(기본 60)분마다 수집. 이력이 없으면 첫 실행은 전체 백필. `AUTO_COLLECT=0` 으로 끔(외부 스케줄러 사용 시). REDASH_* 미설정이면 시작 로그에 경고만 남기고 안 돈다. `/admin/import` 는 실행 중인 쿼리 ID 와, 마지막 응답에 우리가 읽는 컬럼이 다 있었는지를 같이 보여준다(값이 전부 '-' 로 나올 때 여기부터 본다).
 - 로컬 화면 확인(배포 없이): `python scripts/seed_dev.py` 로 `data/dev.db` 에 가상 데이터를 깔고 `python scripts/dev.py` → http://127.0.0.1:8000. `app/*.py` 는 자동 재시작, 템플릿은 새로고침, CSS 는 Ctrl+F5. 시드는 전부 가상 값이며 `data/` 는 gitignore 대상이다.
 - 테스트: `python -m pytest tests -q` (SQLite 인메모리 사용)
 
