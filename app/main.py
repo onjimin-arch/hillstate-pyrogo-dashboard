@@ -200,6 +200,7 @@ def orders(request: Request, grain: str = "day", d: str | None = None,
                sort=sort or "", sdir=sdir, sort_qs=sort_qs,
                segs=kpi.SEG_COLS, seg_names=kpi.SEG_NAMES,
                flag_ratio=kpi.SEG_FLAG_RATIO, flag_min=kpi.SEG_FLAG_MIN_MIN, flag_n=kpi.SEG_FLAG_MIN_N,
+               robot_hours=kpi.ROBOT_HOURS,
                extra_qs=extra + sort_qs, extra_nosort=extra, base_path="/orders")
     return templates.TemplateResponse(request, "orders.html", ctx)
 

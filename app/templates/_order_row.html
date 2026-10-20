@@ -6,7 +6,12 @@
     {% if r.robot_name %}<div class="mut">{{ r.robot_name }}</div>{% endif %}</td>
   <td>{{ r.order_source or '-' }}<div class="mut">{{ r.store_name or '' }}</div></td>
   <td>{{ r.store_type or '-' }}{% if not r.in_scope %}<div class="mut">집계 모수 아님</div>{% endif %}</td>
-  <td>{% if r.consent == '동의' %}<span class="badge">동의</span>{% elif r.consent %}<span class="badge warn">{{ r.consent }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
+  <td{% if r.consent_from_roster %} title="이 주문에는 동의 값이 없어 상점 명부의 현재 상태로 메운 값입니다"{% endif %}>
+    {%- if r.consent == '동의' %}<span class="badge">동의</span>
+    {%- elif r.consent %}<span class="badge warn">{{ r.consent }}</span>
+    {%- else %}<span class="mut">-</span>{% endif -%}
+    {%- if r.consent_from_roster %}<span class="mut">*</span>{% endif -%}
+  </td>
   <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
   <td class="num tot">{{ r.total_min | num(1) }}</td>
   {% for k, lab, tip in segs %}
