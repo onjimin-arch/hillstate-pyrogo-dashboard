@@ -213,6 +213,78 @@ def area_consent_stats(session) -> dict:
     }
 
 
+# ---------------------------------------------------------------- 상점 현황 화면
+STORE_DAYS = 30             # '최근 1개월' 의 정의. 주문건수·액티브 판정에 같이 쓴다
+STORE_PER_PAGE = 100
+CONSENT_KINDS = (CONSENT_OK, CONSENT_NO, CONSENT_NONE)
+STORE_SORTS = {"name": lambda r: (r["store_name"] or "").lower(),
+               "store_type": lambda r: r["store_type"] or "",
+               "consent": lambda r: CONSENT_KINDS.index(r["consent"]) if r["consent"] in CONSENT_KINDS else 9,
+               "changed": lambda r: r["last_changed_date"] or date.min,
+               "orders": lambda r: r["orders"]}
+
+
+def _share(rows: list[dict]) -> dict:
+    """동의/미동의/미응답 건수와 비율. 모수가 0이면 비율은 None(0% 로 보이면 오해한다)."""
+    n = len(rows)
+    out = {"base": n}
+    for key, kind in (("ok", CONSENT_OK), ("no", CONSENT_NO), ("none", CONSENT_NONE)):
+        c = sum(1 for r in rows if r["consent"] == kind)
+        out[key] = c
+        out[f"{key}_pct"] = round(c / n * 100, 1) if n else None
+    out["unknown"] = n - out["ok"] - out["no"] - out["none"]      # 명부에 상태가 없는 상점
+    return out
+
+
+def store_status(session, today: date | None = None, st: str | None = None, q: str | None = None,
+                 page: int = 1, sort: str | None = None, desc: bool = True) -> dict:
+    """상점 동의 현황 화면. 명부(store_consent) + 최근 STORE_DAYS 일 주문건수(raw_orders).
+
+    주문건수는 저장된 값이 아니라 여기서 센다 — Redash 의 주문건수는 조회 기간에 따라
+    달라지는 값이라 테이블에 두지 않았다(db.CONSENT_* 주석). 모든 상태의 주문을 센다:
+    '주문이 나온 상점' 을 보는 것이라 취소 건도 상점이 살아 있다는 신호다.
+    상점ID '0' (상점 정보 없음 — 요기요 등)은 상점이 아니라서 뺀다.
+    """
+    end = data_end(today or date.today())
+    start = end - timedelta(days=STORE_DAYS - 1)
+    lo, hi = _bounds(start, end)
+    counts = dict(session.execute(
+        select(RawOrder.store_id, func.count()).where(RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
+        .group_by(RawOrder.store_id)).all())
+
+    rows = []
+    for r in session.scalars(select(StoreConsent)):
+        if not r.store_id or r.store_id == "0":
+            continue
+        rows.append({
+            "store_id": r.store_id, "store_name": r.store_name, "store_type": r.store_type,
+            "consent": r.consent, "last_changed_date": r.last_changed_date,
+            "first_response_date": r.first_response_date,
+            "changed_after": r.changed_after_response == "Y",
+            "orders": counts.get(r.store_id, 0),
+        })
+
+    kinds = {"loadshop": LOADSHOP, "b2b": "B2B"}
+    if st in kinds:
+        rows = [r for r in rows if r["store_type"] == kinds[st]]
+    stat = {"all": _share(rows), "active": _share([r for r in rows if r["orders"] > 0])}
+    stat["type_mix"] = {k: sum(1 for r in rows if r["store_type"] == v) for k, v in kinds.items()}
+
+    shown = rows
+    if q:
+        k = q.strip().lower()
+        shown = [r for r in shown
+                 if k in (r["store_name"] or "").lower() or k == (r["store_id"] or "").lower()]
+    shown.sort(key=STORE_SORTS.get(sort or "orders", STORE_SORTS["orders"]), reverse=desc)
+    total = len(shown)
+    pages = max((total + STORE_PER_PAGE - 1) // STORE_PER_PAGE, 1)
+    page = min(max(page, 1), pages)
+    return {**stat, "rows": shown[(page - 1) * STORE_PER_PAGE: page * STORE_PER_PAGE],
+            "total": total, "pages": pages, "page": page,
+            "days": STORE_DAYS, "date_from": start, "date_to": end,
+            "updated_at": session.scalar(select(func.max(StoreConsent.collected_at)))}
+
+
 def unfinished_robots(session, s: date, e: date) -> list[RawOrder]:
     """미완료(취소 등) 로봇연계 건. KPI 모수는 아니지만 로봇 건 리스트에는 보이므로 특이사항 카드 집계에만 쓴다."""
     if e < s:
