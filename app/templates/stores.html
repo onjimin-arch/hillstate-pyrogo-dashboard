@@ -2,16 +2,18 @@
 {% block content %}
 {% set tq = (('&st=' ~ st) if st else '') %}
 {% set qq = (('&q=' ~ q | urlencode) if q else '') %}
+{% set rq = (('&rng=' ~ s.rng) if s.rng != '30' else '') %}
 {% set sort_qs = ('&sort=' ~ sort ~ '&dir=' ~ sdir) if sort else '' %}
+{% set keep = tq ~ qq ~ rq %}
 {% macro sth(key, label, tip) %}
-  <th class="num {{ 'sorted' if sort == key }}" title="{{ tip }}"><a class="sortlink" href="/stores?{{ tq }}{{ qq }}&sort={{ key }}&dir={{ 'asc' if sort == key and sdir != 'asc' else 'desc' }}">{{ label }}{% if sort == key %} {{ '▲' if sdir == 'asc' else '▼' }}{% endif %}</a></th>
+  <th class="num {{ 'sorted' if sort == key }}" title="{{ tip }}"><a class="sortlink" href="/stores?{{ keep }}&sort={{ key }}&dir={{ 'asc' if sort == key and sdir != 'asc' else 'desc' }}">{{ label }}{% if sort == key %} {{ '▲' if sdir == 'asc' else '▼' }}{% endif %}</a></th>
 {% endmacro %}
 <p class="help">
-  상점별 <b>로봇배송 동의 여부</b>와 최근 {{ s.days }}일 주문입니다. 출처는 주문 수집과 <b>다른 Redash 쿼리</b>(상점 명부)이고,
+  상점별 <b>로봇배송 동의 여부</b>와 선택 기간의 주문입니다. 출처는 주문 수집과 <b>다른 Redash 쿼리</b>(상점 명부)이고,
   모수가 <b>수원시 승인 상점 전체 + 이 단지에 주문이 있던 상점</b>이라 <b>주문이 한 건도 없는 상점도 들어옵니다</b> — 영업 대상 전체를 보기 위함입니다.
-  <b>액티브 상점</b>은 그중 최근 {{ s.days }}일({{ s.date_from }} ~ {{ s.date_to }})에 이 단지로 주문이 1건 이상 나온 상점입니다(취소 건도 상점이 살아 있다는 신호라 같이 셉니다).
+  <b>액티브 상점</b>은 그중 <b>선택한 기간</b>에 이 단지로 주문이 1건 이상 나온 상점입니다(취소 건도 상점이 살아 있다는 신호라 같이 셉니다).
   동의 상태는 <b>현재값</b>이며, 과거 시점은 최종 변경일로 가늠합니다(주문일보다 이르면 그때도 같은 상태).
-  상점ID가 없는 건(요기요 등 주문처 단위 B2B)은 상점이 아니라 빠집니다.
+  상점ID가 <code>0</code>인 주문(요기요 등 주문처 단위 B2B)은 상점이 아니라 모수에서 빠집니다.
   {% if s.updated_at %}<br>명부 수집 {{ s.updated_at | dt }}{% if consent_query_id %} · 쿼리 {{ consent_query_id }}{% endif %}{% endif %}
 </p>
 
@@ -23,8 +25,48 @@
 </div>
 {% else %}
 
+<div class="group-title">액티브 상점<span style="font-weight:400;color:var(--muted)">
+  {{ s.date_from }} ~ {{ s.date_to }} ({{ s.days }}일) 이 단지로 주문 1건 이상 · 로봇 배송에 실제로 영향을 주는 모수</span></div>
+<div class="controls" style="margin-bottom:10px">
+  <div class="filters">
+    {% for key, label in s.ranges %}
+    <a class="{{ 'on' if s.rng == key }}" href="/stores?rng={{ key }}{{ tq }}{{ qq }}{{ sort_qs }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+</div>
+<div class="cards">
+  <div class="card">
+    <div class="k">액티브 상점 수</div>
+    <div class="v">{{ s.active.base }}<small>곳</small></div>
+    <div class="delta">전체 {{ s.all.base }}곳 중 {{ (s.active.base / s.all.base * 100) | round(1) }}%</div>
+    <div class="sub">이 기간에 주문이 나온 상점만</div>
+  </div>
+  {% for key, label in [('ok', '동의'), ('no', '미동의'), ('none', '미응답')] %}
+  <div class="card">
+    <div class="k">{{ label }}</div>
+    <div class="v">{{ s.active[key] }}<small>곳</small></div>
+    <div class="delta">{{ s.active[key ~ '_pct'] | num(1, '%') }}</div>
+    <div class="sub">액티브 {{ s.active.base }}곳 기준</div>
+  </div>
+  {% endfor %}
+</div>
+{% set g = s.gap %}
+<div class="{{ 'excl-note' if (g.no_store_id or g.orphan_orders) else 'sub' }}" style="margin:8px 2px 0">
+  이 기간 주문 <b>{{ g.orders_total }}건</b> 중 <b>{{ g.counted_orders }}건</b>을 액티브 판정에 썼습니다.
+  {%- if g.agency_orders %} 주문처 단위 B2B(상점ID가 0 — 요기요 등) {{ g.agency_orders }}건은 상점이 아니라 제외합니다.{% endif %}
+  {%- if g.no_store_id %}
+  <br>⚠ <b>상점ID 없이 수집된 주문 {{ g.no_store_id }}건</b> — 어느 상점인지 알 수 없어 액티브에서 빠집니다.
+  상점ID 컬럼이 Redash 쿼리에 추가되기 전에 수집된 건들입니다.
+  {% if can_import %}<a href="/admin/import">데이터 가져오기</a>의 「동의상태만 채우기」를 돌리면 상점ID도 같이 채워집니다.{% else %}관리자에게 「동의상태만 채우기」 실행을 요청하세요.{% endif %}
+  {%- endif %}
+  {%- if g.orphan_orders %}
+  <br>⚠ <b>명부에 없는 상점 {{ g.orphan_shops }}곳({{ g.orphan_orders }}건)</b> — 주문은 있는데 상점 명부에 없습니다.
+  명부 모수가 '수원시 승인 상점'이라 승인이 풀렸거나 주소가 수원시 밖인 상점은 빠져, 그만큼 액티브가 적게 잡힙니다.
+  {%- endif %}
+</div>
+
 <div class="group-title">상점 현황<span style="font-weight:400;color:var(--muted)">
-  {{ '로드샵만' if st == 'loadshop' else ('B2B만' if st == 'b2b' else '로드샵 + B2B') }} · 주문 유무와 무관한 전체 명부</span></div>
+  {{ '로드샵만' if st == 'loadshop' else ('B2B만' if st == 'b2b' else '로드샵 + B2B') }} · 주문 유무와 무관한 전체 명부(영업 대상)</span></div>
 <div class="cards">
   <div class="card">
     <div class="k">전체 상점 수</div>
@@ -41,40 +83,22 @@
   </div>
   {% endfor %}
 </div>
-{% if s.all.unknown %}<div class="sub" style="margin:6px 2px 0">명부에 동의 상태가 없는 상점 {{ s.all.unknown }}곳은 위 세 칸 어디에도 포함되지 않았습니다.</div>{% endif %}
-
-<div class="group-title">액티브 상점<span style="font-weight:400;color:var(--muted)">
-  최근 {{ s.days }}일({{ s.date_from }} ~ {{ s.date_to }}) 이 단지로 주문 1건 이상</span></div>
-<div class="cards">
-  <div class="card">
-    <div class="k">액티브 상점 수</div>
-    <div class="v">{{ s.active.base }}<small>곳</small></div>
-    <div class="delta">전체 {{ s.all.base }}곳 중 {{ (s.active.base / s.all.base * 100) | round(1) }}%</div>
-    <div class="sub">실제로 이 단지에 주문이 나온 상점만</div>
-  </div>
-  {% for key, label in [('ok', '동의'), ('no', '미동의'), ('none', '미응답')] %}
-  <div class="card">
-    <div class="k">{{ label }}</div>
-    <div class="v">{{ s.active[key] }}<small>곳</small></div>
-    <div class="delta">{{ s.active[key ~ '_pct'] | num(1, '%') }}</div>
-    <div class="sub">액티브 {{ s.active.base }}곳 기준</div>
-  </div>
-  {% endfor %}
-</div>
 <div class="sub" style="margin:6px 2px 0">
-  전체 기준과 <b>모수가 다릅니다.</b> 전체는 영업 대상 전부, 액티브는 실제로 주문이 도는 상점입니다 —
-  로봇 배송에 실제로 영향을 주는 쪽은 액티브 기준입니다.
+  액티브 기준과 <b>모수가 다릅니다.</b> 이쪽은 수원시 영업 대상 전부라 아직 이 단지와 접점이 없는 상점까지 들어갑니다 —
+  동의율이 낮은 것은 대부분 <b>미응답</b>(한 번도 응답하지 않은 상점)이 모수에 그대로 남아서입니다.
+  {%- if s.all.unknown %} 명부에 동의 상태가 없는 상점 {{ s.all.unknown }}곳은 위 세 칸 어디에도 포함되지 않았습니다.{% endif %}
 </div>
 
 <div class="group-title">전체 상점 정보</div>
 <div class="controls">
   <div class="filters">
-    <a class="{{ 'on' if not st }}" href="/stores?{{ qq }}{{ sort_qs }}">모든 상점 {{ s.all.base if not st else '' }}</a>
-    <a class="{{ 'on' if st == 'loadshop' }}" href="/stores?st=loadshop{{ qq }}{{ sort_qs }}">로드샵</a>
-    <a class="{{ 'on' if st == 'b2b' }}" href="/stores?st=b2b{{ qq }}{{ sort_qs }}">B2B</a>
+    <a class="{{ 'on' if not st }}" href="/stores?{{ qq }}{{ rq }}{{ sort_qs }}">모든 상점 {{ s.all.base if not st else '' }}</a>
+    <a class="{{ 'on' if st == 'loadshop' }}" href="/stores?st=loadshop{{ qq }}{{ rq }}{{ sort_qs }}">로드샵</a>
+    <a class="{{ 'on' if st == 'b2b' }}" href="/stores?st=b2b{{ qq }}{{ rq }}{{ sort_qs }}">B2B</a>
   </div>
   <form method="get" action="/stores" class="range">
     {% if st %}<input type="hidden" name="st" value="{{ st }}">{% endif %}
+    {% if s.rng != '30' %}<input type="hidden" name="rng" value="{{ s.rng }}">{% endif %}
     {% if sort %}<input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ sdir }}">{% endif %}
     <input type="text" name="q" value="{{ q }}" placeholder="상점명·상점ID 검색" size="22">
     <button class="theme" type="submit">검색</button>
@@ -84,11 +108,11 @@
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
-    <th><a class="sortlink" href="/stores?{{ tq }}{{ qq }}&sort=name&dir={{ 'asc' if sort == 'name' and sdir != 'asc' else 'desc' }}">상점이름{% if sort == 'name' %} {{ '▲' if sdir == 'asc' else '▼' }}{% endif %}</a></th>
+    <th><a class="sortlink" href="/stores?{{ keep }}&sort=name&dir={{ 'asc' if sort == 'name' and sdir != 'asc' else 'desc' }}">상점이름{% if sort == 'name' %} {{ '▲' if sdir == 'asc' else '▼' }}{% endif %}</a></th>
     <th>상점구분</th>
     {{ sth('consent', '동의여부', '동의 → 미동의 → 미응답 순') }}
     {{ sth('changed', '최종 변경일', '동의 상태가 마지막으로 바뀐 날') }}
-    {{ sth('orders', '주문건수<br>(최근 ' ~ s.days ~ '일)', s.date_from ~ ' ~ ' ~ s.date_to ~ ' · 모든 상태 포함') }}
+    {{ sth('orders', '주문건수', s.date_from ~ ' ~ ' ~ s.date_to ~ ' · 모든 상태 포함') }}
   </tr></thead>
   <tbody>
   {% for r in s.rows %}
@@ -112,7 +136,7 @@
 </div>
 {% if s.pages > 1 %}
 <div class="pager" style="margin-top:12px">
-  {% set base_q = '/stores?' ~ tq ~ qq ~ sort_qs %}
+  {% set base_q = '/stores?' ~ keep ~ sort_qs %}
   {% if s.page > 1 %}<a href="{{ base_q }}&page={{ s.page - 1 }}">◀</a>{% else %}<span class="dis">◀</span>{% endif %}
   <span class="plabel">{{ s.page }} / {{ s.pages }} 페이지</span>
   {% if s.page < s.pages %}<a href="{{ base_q }}&page={{ s.page + 1 }}">▶</a>{% else %}<span class="dis">▶</span>{% endif %}

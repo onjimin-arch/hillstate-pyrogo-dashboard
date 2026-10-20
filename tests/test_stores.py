@@ -131,3 +131,55 @@ def test_stores_page_renders(client):
     page = client.get("/stores", headers=h).text
     assert "가상김밥" in page and "전체 상점 수" in page and "액티브 상점 수" in page
     assert "가상커피" not in client.get("/stores?q=김밥", headers=h).text
+
+
+def test_gap_surfaces_orders_that_cannot_be_counted(session):
+    """액티브가 적게 나오는 두 경로를 화면에서 드러내야 한다 — 숫자만 보면 '상점이 적다'로 오해한다.
+    ① 상점ID 없이 수집된 과거 주문  ② 주문은 있는데 명부에 없는 상점."""
+    session.merge(store("S1", "동의"))
+    session.add_all([
+        order("D1", "S1", date(2026, 10, 18)),          # 정상 집계
+        order("D2", None, date(2026, 10, 17)),          # ① 상점ID 없음(과거 수집분)
+        order("D3", "", date(2026, 10, 17)),            # ① 빈 문자열도 같은 취급
+        order("D4", "0", date(2026, 10, 16)),           # 주문처 단위 B2B — 상점 아님
+        order("D5", "S404", date(2026, 10, 15)),        # ② 명부에 없는 상점
+        order("D6", "S404", date(2026, 10, 14)),
+    ])
+    session.commit()
+
+    g = kpi.store_status(session, today=TODAY)["gap"]
+    assert g["orders_total"] == 6
+    assert g["no_store_id"] == 2 and g["agency_orders"] == 1
+    assert (g["orphan_shops"], g["orphan_orders"]) == (1, 2)
+    assert g["counted_orders"] == 1
+
+
+def test_range_options(session):
+    """기간 선택: 30일·90일·PoC 전체·수집 전 기간. 끝은 항상 D-1."""
+    session.merge(store("S1", "동의"))
+    session.add_all([order("D1", "S1", date(2026, 10, 18)),
+                     order("D0", "S1", date(2026, 7, 1))])      # 30일·90일 밖, 전 기간 안
+    session.commit()
+
+    assert kpi.store_range(session, "30", TODAY)[:2] == (date(2026, 9, 20), date(2026, 10, 19))
+    assert kpi.store_range(session, "90", TODAY)[0] == date(2026, 7, 22)
+    assert kpi.store_range(session, "poc", TODAY)[0] == date(2026, 9, 29)
+    assert kpi.store_range(session, "all", TODAY)[0] == date(2026, 7, 1)   # 가장 이른 주문
+    assert kpi.store_range(session, "이상한값", TODAY)[2] == "30"           # 기본값으로 떨어진다
+
+    assert kpi.store_status(session, today=TODAY, rng="30")["rows"][0]["orders"] == 1
+    wide = kpi.store_status(session, today=TODAY, rng="all")
+    assert wide["rows"][0]["orders"] == 2 and wide["rng"] == "all"
+
+
+def test_range_chips_and_order_in_page(client):
+    """화면: 액티브 섹션이 전체 명부 섹션보다 위. 기간 칩이 선택을 유지한다."""
+    h = jwt("jmlee@barogo.com")
+    SL = dbm.get_session_factory()
+    with SL() as s:
+        s.merge(store("S1", "동의", name="가상김밥"))
+        s.commit()
+    page = client.get("/stores", headers=h).text
+    assert page.index("액티브 상점") < page.index("주문 유무와 무관한 전체 명부")
+    assert 'href="/stores?rng=all"' in page
+    assert "rng=poc" in client.get("/stores?rng=poc", headers=h).text

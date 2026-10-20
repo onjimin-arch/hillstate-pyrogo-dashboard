@@ -214,7 +214,10 @@ def area_consent_stats(session) -> dict:
 
 
 # ---------------------------------------------------------------- 상점 현황 화면
-STORE_DAYS = 30             # '최근 1개월' 의 정의. 주문건수·액티브 판정에 같이 쓴다
+STORE_DAYS = 30             # 기본 기간. 주문건수·액티브 판정에 같이 쓴다
+# 액티브 기준 기간 선택지. 30일은 최근 영업 상태를 보고, 길게 잡으면 '한 번이라도 주문이
+# 나온 적 있는 상점' 에 가까워진다 — 어느 쪽이 맞는지는 보는 목적에 따라 다르다.
+STORE_RANGES = [("30", "최근 30일"), ("90", "최근 90일"), ("poc", "PoC 전체"), ("all", "수집 전 기간")]
 STORE_PER_PAGE = 100
 CONSENT_KINDS = (CONSENT_OK, CONSENT_NO, CONSENT_NONE)
 STORE_SORTS = {"name": lambda r: (r["store_name"] or "").lower(),
@@ -236,21 +239,44 @@ def _share(rows: list[dict]) -> dict:
     return out
 
 
+def store_range(session, rng: str | None, today: date) -> tuple[date, date, str]:
+    """액티브 판정 기간. (시작, 끝, 선택키). 끝은 항상 D-1."""
+    end = data_end(today)
+    key = rng if rng in dict(STORE_RANGES) else "30"
+    if key == "all":
+        first = session.scalar(select(func.min(RawOrder.ord_dt)))
+        start = first.date() if first else end
+    elif key == "poc":
+        start = date.fromisoformat(str(CFG["poc"]["start"]))
+    else:
+        start = end - timedelta(days=int(key) - 1)
+    return min(start, end), end, key
+
+
 def store_status(session, today: date | None = None, st: str | None = None, q: str | None = None,
-                 page: int = 1, sort: str | None = None, desc: bool = True) -> dict:
-    """상점 동의 현황 화면. 명부(store_consent) + 최근 STORE_DAYS 일 주문건수(raw_orders).
+                 page: int = 1, sort: str | None = None, desc: bool = True,
+                 rng: str | None = None) -> dict:
+    """상점 동의 현황 화면. 명부(store_consent) + 선택 기간의 주문건수(raw_orders).
 
     주문건수는 저장된 값이 아니라 여기서 센다 — Redash 의 주문건수는 조회 기간에 따라
     달라지는 값이라 테이블에 두지 않았다(db.CONSENT_* 주석). 모든 상태의 주문을 센다:
     '주문이 나온 상점' 을 보는 것이라 취소 건도 상점이 살아 있다는 신호다.
     상점ID '0' (상점 정보 없음 — 요기요 등)은 상점이 아니라서 뺀다.
+
+    액티브 수가 실제보다 적게 나올 수 있는 경로가 둘 있어 gap 으로 같이 돌려준다:
+    ① 상점ID 없이 수집된 과거 주문(상점ID 컬럼이 쿼리에 추가되기 전) — 어느 상점인지 모른다.
+    ② 주문은 있는데 명부에 없는 상점 — 명부 모수가 '수원시 승인 상점' 이라 승인이 풀렸거나
+       주소가 수원시 밖인 상점은 빠진다. 이 둘이 크면 액티브 숫자를 믿으면 안 된다.
     """
-    end = data_end(today or date.today())
-    start = end - timedelta(days=STORE_DAYS - 1)
+    today = today or date.today()
+    start, end, rng_key = store_range(session, rng, today)
     lo, hi = _bounds(start, end)
     counts = dict(session.execute(
         select(RawOrder.store_id, func.count()).where(RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
         .group_by(RawOrder.store_id)).all())
+    orders_total = sum(counts.values())
+    no_store_id = sum(n for sid, n in counts.items() if not sid)        # ① 상점ID 없음
+    agency_orders = counts.get("0", 0)                                  # 주문처 단위 B2B(상점 아님)
 
     rows = []
     for r in session.scalars(select(StoreConsent)):
@@ -264,10 +290,18 @@ def store_status(session, today: date | None = None, st: str | None = None, q: s
             "orders": counts.get(r.store_id, 0),
         })
 
+    known = {r["store_id"] for r in rows}
+    orphan_ids = [sid for sid in counts if sid and sid != "0" and sid not in known]   # ② 명부에 없음
+    gap = {"orders_total": orders_total, "no_store_id": no_store_id,
+           "agency_orders": agency_orders,
+           "orphan_shops": len(orphan_ids),
+           "orphan_orders": sum(counts[sid] for sid in orphan_ids)}
+    gap["counted_orders"] = orders_total - no_store_id - agency_orders - gap["orphan_orders"]
+
     kinds = {"loadshop": LOADSHOP, "b2b": "B2B"}
     if st in kinds:
         rows = [r for r in rows if r["store_type"] == kinds[st]]
-    stat = {"all": _share(rows), "active": _share([r for r in rows if r["orders"] > 0])}
+    stat = {"all": _share(rows), "active": _share([r for r in rows if r["orders"] > 0]), "gap": gap}
     stat["type_mix"] = {k: sum(1 for r in rows if r["store_type"] == v) for k, v in kinds.items()}
 
     shown = rows
@@ -281,7 +315,8 @@ def store_status(session, today: date | None = None, st: str | None = None, q: s
     page = min(max(page, 1), pages)
     return {**stat, "rows": shown[(page - 1) * STORE_PER_PAGE: page * STORE_PER_PAGE],
             "total": total, "pages": pages, "page": page,
-            "days": STORE_DAYS, "date_from": start, "date_to": end,
+            "days": (end - start).days + 1, "rng": rng_key, "ranges": STORE_RANGES,
+            "date_from": start, "date_to": end,
             "updated_at": session.scalar(select(func.max(StoreConsent.collected_at)))}
 
 
