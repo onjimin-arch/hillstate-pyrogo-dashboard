@@ -235,3 +235,34 @@ def test_consent_targets_section_in_page(client):
     assert "우선 공략 대상" in page and "가상떡볶이" in page
     assert page.index("액티브 상점") < page.index("우선 공략 대상") < page.index("주문 유무와 무관한 전체 명부")
     assert "먼저 칠 곳" in page                      # 절반을 덮는 앞부분 카드
+
+
+def test_share_counts_orders_not_only_shops(session):
+    """상점 수와 주문 비중은 따로 봐야 한다 — 주문이 많은 상점이 먼저 동의하는 경향이 있어
+    '동의 상점 비율' 과 '동의 상점에서 나온 주문 비율' 이 크게 벌어진다."""
+    for sid, c in [("S1", "동의"), ("S2", "미동의"), ("S3", "미동의"), ("S4", "미동의")]:
+        session.merge(store(sid, c))
+    o = 0
+    for sid, n in [("S1", 90), ("S2", 5), ("S3", 3), ("S4", 2)]:
+        for _ in range(n):
+            o += 1
+            session.add(order(f"D{o}", sid, date(2026, 10, 18)))
+    session.commit()
+
+    a = kpi.store_status(session, today=TODAY)["active"]
+    assert (a["base"], a["orders"]) == (4, 100)
+    assert (a["ok"], a["ok_pct"]) == (1, 25.0)            # 상점 수로는 4곳 중 1곳
+    assert (a["ok_orders"], a["ok_opct"]) == (90, 90.0)   # 주문으로는 90%
+    assert (a["no_orders"], a["no_opct"]) == (10, 10.0)
+    assert (a["none_orders"], a["none_opct"]) == (0, 0.0)
+
+
+def test_order_share_rendered(client):
+    h = jwt("jmlee@barogo.com")
+    SL = dbm.get_session_factory()
+    with SL() as s:
+        s.merge(store("S1", "동의", name="가상김밥"))
+        s.add(order("D1", "S1", date.today() - timedelta(days=2)))
+        s.commit()
+    page = client.get("/stores", headers=h).text
+    assert "주문 비중" in page and "이 기간 로드샵 주문" in page

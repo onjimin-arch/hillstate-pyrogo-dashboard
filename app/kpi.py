@@ -228,14 +228,24 @@ STORE_SORTS = {"name": lambda r: (r["store_name"] or "").lower(),
 
 
 def _share(rows: list[dict]) -> dict:
-    """동의/미동의/미응답 건수와 비율. 모수가 0이면 비율은 None(0% 로 보이면 오해한다)."""
+    """동의/미동의/미응답의 상점 수·비율과 **주문 수·비율**. 모수가 0이면 비율은 None.
+
+    상점 수와 주문 비중은 따로 봐야 한다 — 주문이 많은 상점이 먼저 동의하는 경향이 있어
+    '동의 상점 비율' 보다 '동의 상점에서 나온 주문 비율' 이 훨씬 높게 나온다. 로봇 배송이
+    실제로 덮을 수 있는 물량은 뒤쪽이다.
+    """
     n = len(rows)
-    out = {"base": n}
+    total_orders = sum(r["orders"] for r in rows)
+    out = {"base": n, "orders": total_orders}
     for key, kind in (("ok", CONSENT_OK), ("no", CONSENT_NO), ("none", CONSENT_NONE)):
-        c = sum(1 for r in rows if r["consent"] == kind)
-        out[key] = c
-        out[f"{key}_pct"] = round(c / n * 100, 1) if n else None
+        group = [r for r in rows if r["consent"] == kind]
+        o = sum(r["orders"] for r in group)
+        out[key] = len(group)
+        out[f"{key}_pct"] = round(len(group) / n * 100, 1) if n else None
+        out[f"{key}_orders"] = o
+        out[f"{key}_opct"] = round(o / total_orders * 100, 1) if total_orders else None
     out["unknown"] = n - out["ok"] - out["no"] - out["none"]      # 명부에 상태가 없는 상점
+    out["unknown_orders"] = total_orders - out["ok_orders"] - out["no_orders"] - out["none_orders"]
     return out
 
 

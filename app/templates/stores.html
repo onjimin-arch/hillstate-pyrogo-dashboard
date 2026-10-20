@@ -47,14 +47,18 @@
     <div class="k">액티브 상점 수</div>
     <div class="v">{{ s.active.base }}<small>곳</small></div>
     <div class="delta">로드샵 {{ s.type_mix.loadshop }}곳 중 {{ (s.active.base / s.type_mix.loadshop * 100) | round(1) if s.type_mix.loadshop else 0 }}%</div>
-    <div class="sub">이 기간에 주문이 나온 로드샵만</div>
+    <div class="sub">이 기간 로드샵 주문 <b>{{ s.active.orders }}건</b>이 여기서 나왔습니다</div>
   </div>
   {% for key, label in [('ok', '동의'), ('no', '미동의'), ('none', '미응답')] %}
   <div class="card">
     <div class="k">{{ label }}</div>
     <div class="v">{{ s.active[key] }}<small>곳</small></div>
-    <div class="delta">{{ s.active[key ~ '_pct'] | num(1, '%') }}</div>
-    <div class="sub">액티브 {{ s.active.base }}곳 기준</div>
+    <div class="delta">상점 {{ s.active[key ~ '_pct'] | num(1, '%') }} <span class="mut">(액티브 {{ s.active.base }}곳 중)</span></div>
+    <div class="sub" style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">
+      주문 <b>{{ s.active[key ~ '_orders'] }}건</b> ·
+      <b style="font-size:15px;color:var(--{{ 'brand' if key == 'ok' else 'amber-ink' }})">{{ s.active[key ~ '_opct'] | num(1, '%') }}</b>
+      <span class="mut">(주문 {{ s.active.orders }}건 중)</span>
+    </div>
   </div>
   {% endfor %}
 </div>
@@ -62,6 +66,13 @@
 
 {% set g2 = s.targets %}
 {% if st != 'b2b' %}
+<div class="sub" style="margin:8px 2px 0">
+  <b>상점 수</b>와 <b>주문 비중</b>을 같이 봅니다 — 주문이 많은 상점이 먼저 동의하는 경향이 있어,
+  동의 상점 비율보다 <b>동의 상점에서 나온 주문의 비율</b>이 높게 나옵니다.
+  로봇 배송이 실제로 덮을 수 있는 물량은 뒤쪽 숫자입니다.
+  {%- if s.active.unknown %} 동의 상태가 명부에 없는 상점 {{ s.active.unknown }}곳(주문 {{ s.active.unknown_orders }}건)은 세 칸 어디에도 들어가지 않았습니다.{% endif %}
+</div>
+
 <div class="group-title">우선 공략 대상 <span class="badge warn">동의 전환</span><span style="font-weight:400;color:var(--muted)">
   로드샵 미동의·미응답 중 <b>주문이 나오는</b> 상점 · 주문건수 순</span></div>
 {% if g2.shops %}
