@@ -529,3 +529,29 @@ def test_miss_uses_roster_consent_for_old_orders(session):
     r = kpi.order_list(session, p, "miss")
     assert r["total"] == 1 and r["rows"][0]["delivery_id"] == "1"
     assert r["rows"][0]["consent_from_roster"] is True                       # 출처가 명부임을 표시
+
+
+def test_dashboard_consent_card_uses_fixed_30d_window(session, monkeypatch):
+    """동의 주문 비중은 기간이 짧으면 몇 건으로 100%/0% 까지 튄다. 선택 기간과 별개로
+    최근 30일 고정 창 값을 같이 내려줘야 카드가 표본에 휘둘리지 않는다."""
+    import app.kpi as k
+
+    class _D(date):                       # today() 고정
+        @classmethod
+        def today(cls):
+            return date(2026, 10, 1)
+    monkeypatch.setattr(k, "date", _D)
+
+    o = session.get(dbm.RawOrder, "1")    # 선택 기간(9/30 하루) 안의 유일한 로드샵 완료 건
+    o.store_id, o.store_robot_consent = "S1", "동의"
+    old = make_order(99, day=10, hour=12)   # 30일 창 안, 선택 기간 밖
+    old.store_id, old.store_robot_consent = "S2", "미동의"
+    session.add(old)
+    session.commit()
+
+    p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
+    m = kpi.dashboard(session, p)["metrics"]
+    assert m["consent_order_pct"] == 100.0                      # 선택 기간: 1건뿐이라 100%
+    c = m["consent30"]
+    assert (c["date_from"], c["date_to"]) == (date(2026, 9, 1), date(2026, 9, 30))
+    assert c["consent_order_base"] == 2 and c["consent_order_pct"] == 50.0   # 30일 창: 2건 중 1건

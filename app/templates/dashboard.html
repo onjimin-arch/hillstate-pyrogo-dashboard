@@ -29,11 +29,16 @@
     <div class="sub">로봇 누락 사유 기록 {{ m.miss_n }}건</div>
   </div>
   <div class="card">
-    <div class="k">동의 상점 주문 비중 <span class="badge">로드샵 기준</span></div>
-    <div class="v">{{ m.consent_order_pct | num(1) }}<small>%</small></div>
-    <div class="delta">동의 상점 주문 {{ m.consent_order_n }} / {{ m.consent_order_base }}건 · {{ p.label }}</div>
+    {% set c = m.consent30 %}
+    <div class="k">동의 상점 주문 비중 <span class="badge">로드샵 · 최근 {{ c.days }}일</span></div>
+    <div class="v">{{ c.consent_order_pct | num(1) }}<small>%</small></div>
+    <div class="delta">동의 상점 주문 {{ c.consent_order_n }} / {{ c.consent_order_base }}건 · {{ c.date_from }} ~ {{ c.date_to }}</div>
+    <div class="sub" title="주문 비중은 기간이 짧으면 몇 건으로 100%·0% 까지 튀어서, 이 카드만 선택 기간과 무관하게 최근 30일로 고정했습니다.">
+      선택 기간({{ p.label }}) {{ m.consent_order_pct | num(1, '%') }}
+      <span class="mut">· {{ m.consent_order_n }} / {{ m.consent_order_base }}건</span>
+    </div>
     <div class="sub" title="상점 수 기준입니다. 주문이 많은 상점이 먼저 동의하는 경향이 있어 주문 비중보다 낮게 나옵니다.">
-      상점 기준 {{ m.consent_shop_pct | num(1, '%') }} — 동의 {{ m.consent_shops }} · 미동의 {{ m.noconsent_shops }} · 미응답 {{ m.noresp_shops }} / 상점 {{ m.consent_shop_base }}곳
+      상점 기준 {{ c.consent_shop_pct | num(1, '%') }} — 동의 {{ c.consent_shops }} · 미동의 {{ c.noconsent_shops }} · 미응답 {{ c.noresp_shops }} / 상점 {{ c.consent_shop_base }}곳
       · <a href="/stores">기간별로 보기</a>
     </div>
     {% if m.area_base %}
