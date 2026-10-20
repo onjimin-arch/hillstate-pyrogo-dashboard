@@ -15,6 +15,12 @@ targets:
   success_pct: 90                    # 로봇 배송 성공률 목표(%)
 timely_threshold_sec: 420            # 적재함닫힘→로봇배송완료 7분
 
+# 로봇 운영시간(접수 시각 기준, start <= 시각 < end). 로봇 누락 후보 판정에만 쓴다.
+# 잠정값이라 운영 실태를 보고 조정할 것(설계서 §5).
+robot_hours:
+  start: 13
+  end: 21
+
 poc:
   start: "2026-09-29"
   end: "2026-10-30"

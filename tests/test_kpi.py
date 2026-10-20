@@ -159,8 +159,11 @@ def test_order_list_filters_and_miss_candidates(session):
     p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
     r = kpi.order_list(session, p)
     assert r["total"] == 7 and r["counts"]["robot"] == 3                    # B2B·취소 포함 전체
-    assert r["counts"]["miss"] == 3                                          # 로봇 안 탄 로드샵 완료(1,2)
-    assert kpi.order_list(session, p, "miss")["total"] == 3
+    assert r["counts"]["general"] == 4                                       # 전체에서 로봇연계만 뺀 것
+    assert kpi.order_list(session, p, "general")["total"] == 4
+    # 누락 후보는 로드샵·동의·운영시간을 모두 만족해야 한다. fixture 는 12시 접수에 동의값이
+    # 없어 하나도 해당하지 않는다(조건별 판정은 test_robot_miss_conditions 참고).
+    assert r["counts"]["miss"] == 0 and kpi.order_list(session, p, "miss")["total"] == 0
     assert kpi.order_list(session, p, st="b2b")["total"] == 1
     assert kpi.order_list(session, p, q="3")["total"] >= 1
     by_id = {x["delivery_id"]: x for x in kpi.order_list(session, p)["rows"]}
@@ -492,3 +495,37 @@ def test_consent_by_store_and_dashboard_wiring(session):
                                                   today=date(2026, 10, 1)))["metrics"]
     assert m["consent_shop_base"] == 1 and m["consent_shops"] == 1        # 명부로 보정됨
     assert m["area_base"] == 1 and m["area_consent_pct"] == 100.0
+
+
+def test_robot_miss_conditions(session):
+    """로봇 누락 후보: 로봇으로 갈 수 있었는데 안 간 건만. 조건을 하나씩 떼어 확인한다 —
+    B2B·미동의·운영시간 밖까지 세면 '누락' 이 아니라 '원래 못 가는 건' 을 세게 된다."""
+    base = dict(is_robot=False, delivery_status="DROP_FINISHED", store_type="일반(로드샵)",
+                consent="동의", ord_dt=datetime(2026, 9, 30, 15, 0))
+    assert kpi.is_robot_miss(base)
+    assert not kpi.is_robot_miss({**base, "is_robot": True})                  # 이미 로봇이 감
+    assert not kpi.is_robot_miss({**base, "delivery_status": "CANCELED"})     # 취소
+    assert not kpi.is_robot_miss({**base, "store_type": "B2B"})               # 로봇 대상 아님
+    assert not kpi.is_robot_miss({**base, "consent": "미동의"})
+    assert not kpi.is_robot_miss({**base, "consent": ""})                     # 동의 여부 모름
+    assert not kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 12, 59)})
+    assert kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 13, 0)})    # 시작 정각 포함
+    assert kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 20, 59)})
+    assert not kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 21, 0)})  # 종료 정각 제외
+
+
+def test_miss_uses_roster_consent_for_old_orders(session):
+    """동의 컬럼이 쿼리에 추가되기 전 수집분은 주문 행 값이 NULL 이다. 상점 명부로 메우지 않으면
+    과거 기간의 누락 후보가 통째로 0 건으로 보인다."""
+    o = session.get(dbm.RawOrder, "1")
+    o.ord_dt = datetime(2026, 9, 30, 15, 0)
+    o.store_id, o.store_robot_consent = "S1", None
+    session.commit()
+    p = kpi.resolve_period("day", date(2026, 9, 30), None, None, today=date(2026, 10, 1))
+    assert kpi.order_list(session, p)["counts"]["miss"] == 0                 # 명부 없으면 모름
+
+    session.merge(dbm.StoreConsent(store_id="S1", consent="동의", store_type="일반(로드샵)"))
+    session.commit()
+    r = kpi.order_list(session, p, "miss")
+    assert r["total"] == 1 and r["rows"][0]["delivery_id"] == "1"
+    assert r["rows"][0]["consent_from_roster"] is True                       # 출처가 명부임을 표시

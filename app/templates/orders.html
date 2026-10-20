@@ -8,7 +8,11 @@
 {% endmacro %}
 <p class="help">
   이 단지의 <b>모든 주문</b>(로드샵·B2B, 완료·취소 포함)을 모아 봅니다. 로봇으로 처리했어야 했는데 놓친 주문을 찾고 사유를 남기는 용도입니다.
-  <b>로봇 누락 후보</b> = 로봇을 타지 않은 완료 건(로드샵·B2B)입니다.
+  <b>일반 배송</b> = 전체에서 로봇연계만 뺀 것(취소·모수 밖 포함)이고, 그중
+  <b>로봇 누락 후보</b> = <b>로봇으로 갈 수 있었는데 로봇이 안 붙은 완료 건</b>입니다 —
+  ①로드샵 ②상점이 로봇배송 <b>동의</b> ③접수가 로봇 운영시간({{ robot_hours[0] }}:00~{{ robot_hours[1] }}:00) 안.
+  세 조건이 없으면 애초에 로봇이 못 가는 건(B2B·미동의 상점·심야)까지 누락으로 세게 됩니다.
+  동의 여부는 주문에 값이 없으면 <a href="/stores">상점 현황</a>의 명부 값으로 메우고, 그 경우 <b>*</b> 를 붙입니다.
   사유 구분(시스템 오류·테스트 주문 등)과 특이사항은 입력칸을 벗어날 때 저장됩니다.
   <b>테스트 주문</b> 등 실적이 아닌 건은 <b>집계 제외</b>를 체크하세요(완료 건수·평균 시간 등 모든 집계에서 빠집니다).
   <label style="margin-left:8px">입력자 <input type="text" id="editor" placeholder="이름" size="8"></label>
@@ -25,7 +29,8 @@
 <div class="controls">
   <div class="filters">
     <a class="{{ 'on' if not flt }}" href="/orders?{{ qs }}{{ extra_qs }}">전체 {{ counts.all }}</a>
-    <a class="{{ 'on' if flt == 'miss' }}" href="/orders?{{ qs }}&flt=miss{{ extra_qs }}">로봇 누락 후보 {{ counts.miss }}</a>
+    <a class="{{ 'on' if flt == 'general' }}" href="/orders?{{ qs }}&flt=general{{ extra_qs }}">일반 배송 {{ counts.general }}</a>
+    <a class="{{ 'on' if flt == 'miss' }}" href="/orders?{{ qs }}&flt=miss{{ extra_qs }}" title="일반 배송 중 로봇으로 갈 수 있었던 건">└ 로봇 누락 후보 {{ counts.miss }}</a>
     <a class="{{ 'on' if flt == 'robot' }}" href="/orders?{{ qs }}&flt=robot{{ extra_qs }}">로봇연계 {{ counts.robot }}</a>
     <a class="{{ 'on' if flt == 'noted' }}" href="/orders?{{ qs }}&flt=noted{{ extra_qs }}">사유·특이사항 {{ counts.noted }}</a>
     <a class="{{ 'on' if flt == 'excluded' }}" href="/orders?{{ qs }}&flt=excluded{{ extra_qs }}">집계 제외 {{ counts.excluded }}</a>

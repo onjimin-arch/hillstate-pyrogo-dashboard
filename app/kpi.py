@@ -934,7 +934,14 @@ def _period_rows(session, p: Period) -> tuple[list[dict], dict]:
                                    RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
             .order_by(RawOrder.ord_dt.desc()))
     notes = load_notes(session)
-    rows = [order_row_view(o, notes.get(o.delivery_id)) for o in session.scalars(stmt)]
+    roster = consent_by_store(session)
+    rows = []
+    for o in session.scalars(stmt):
+        r = order_row_view(o, notes.get(o.delivery_id))
+        if not r["consent"]:
+            r["consent"] = roster.get(o.store_id or "", "")
+            r["consent_from_roster"] = bool(r["consent"])     # 화면에서 출처를 구분해 표시
+        rows.append(r)
     return rows, _mark_outliers(rows)
 
 
@@ -942,6 +949,27 @@ def order_row_marked(session, p: Period, delivery_id: str) -> dict | None:
     """단건 재렌더용. 강조는 기간 평균이 있어야 정해지므로 같은 기간을 다시 깐다."""
     rows, _ = _period_rows(session, p)
     return next((r for r in rows if r["delivery_id"] == delivery_id), None)
+
+
+ROBOT_HOURS = (int(CFG["robot_hours"]["start"]), int(CFG["robot_hours"]["end"]))
+
+
+def in_robot_hours(dt: datetime | None) -> bool:
+    """접수 시각이 로봇 운영시간 안인지. start <= 시각 < end (end 시각 정각은 제외)."""
+    return dt is not None and ROBOT_HOURS[0] <= dt.hour < ROBOT_HOURS[1]
+
+
+def is_robot_miss(r: dict) -> bool:
+    """로봇 누락 후보 = 로봇으로 갈 수 있었는데 로봇이 안 붙은 완료 건.
+
+    조건은 ① 로봇연계가 아님 ② 완료 ③ 로드샵 ④ 상점이 로봇배송 동의 ⑤ 접수가 로봇 운영시간 안.
+    ③④⑤가 없으면 애초에 로봇이 못 가는 건까지 '누락' 으로 세게 된다(B2B·미동의 상점·심야).
+    동의 여부는 주문 행 값이 없으면 상점 명부로 메운 값을 쓴다 — 동의 컬럼이 쿼리에 추가되기
+    전 수집분이 NULL 이라, 그대로 두면 과거 기간이 통째로 0 건으로 보인다.
+    """
+    return (not r["is_robot"] and r["delivery_status"] == DONE
+            and r["store_type"] == LOADSHOP and r["consent"] == CONSENT_OK
+            and in_robot_hours(r["ord_dt"]))
 
 
 def order_list(session, p: Period, flt: str | None = None, st: str | None = None,
@@ -959,20 +987,20 @@ def order_list(session, p: Period, flt: str | None = None, st: str | None = None
         rows = [r for r in rows if any(k in str(r[f] or "").lower() for f in
                                        ("order_id", "delivery_id", "store_name", "order_source", "robot_name"))]
 
-    def is_miss(r):      # 로봇 안 탄 모수 내 완료 건 = 로봇 누락 후보
-        return not r["is_robot"] and r["in_scope"] and r["delivery_status"] == DONE
-
     counts = {
         "all": len(rows),
         "robot": sum(1 for r in rows if r["is_robot"]),
-        "miss": sum(1 for r in rows if is_miss(r)),
+        "general": sum(1 for r in rows if not r["is_robot"]),
+        "miss": sum(1 for r in rows if is_robot_miss(r)),
         "noted": sum(1 for r in rows if r["miss_reason"] or r["note"] or r["exclude"]),
         "excluded": sum(1 for r in rows if r["exclude"]),
     }
     if flt == "robot":
         rows = [r for r in rows if r["is_robot"]]
+    elif flt == "general":          # 전체에서 로봇연계만 뺀 것(취소·모수 밖도 그대로 둔다)
+        rows = [r for r in rows if not r["is_robot"]]
     elif flt == "miss":
-        rows = [r for r in rows if is_miss(r)]
+        rows = [r for r in rows if is_robot_miss(r)]
     elif flt == "noted":
         rows = [r for r in rows if r["miss_reason"] or r["note"] or r["exclude"]]
     elif flt == "excluded":
