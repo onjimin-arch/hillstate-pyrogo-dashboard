@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app import db as dbm  # noqa: E402
 from test_import import client, jwt  # noqa: E402,F401  (fixture 재사용)
 
 
@@ -85,3 +86,29 @@ def test_status_reports_response_columns(client, monkeypatch):
     j = client.get("/admin/collect/status", headers=h).json()
     assert j["query_id"] == "3531"
     assert j["cols"]["missing"] == ["상점로봇동의상태"] and j["cols"]["n"] == len(sent)
+
+
+def test_consent_backfill_leaves_a_log_row(client, monkeypatch):
+    """백필 결과는 프로세스 메모리에만 두면 재배포 때 사라진다. collect_log 에 info 로 남기되
+    '마지막 수집 시각'이나 '수집 실패' 표시는 건드리지 않아야 한다."""
+    import time
+    from datetime import date
+
+    from app import kpi, scheduler
+    monkeypatch.setattr(scheduler, "orders_date_range", lambda s: (date(2026, 8, 1), date(2026, 10, 19)))
+    monkeypatch.setattr(scheduler, "backfill_consent", lambda *a, **k: {
+        "months": 3, "fetched": 900, "matched": 880, "updated": 870, "not_in_db": 2,
+        "no_consent_col": [], "failed": []})
+    h = {**jwt("jmlee@barogo.com"), "x-requested-with": "x"}
+    assert client.post("/admin/collect/consent", headers=h).status_code == 202
+    for _ in range(50):
+        if not scheduler.STATE["running"] and scheduler.STATE["last_consent"]:
+            break
+        time.sleep(0.05)
+
+    rows = client.get("/admin/collect/status", headers=h).json()["log"]
+    assert rows and rows[0]["status"] == "info" and "동의상태 백필" in rows[0]["message"]
+    assert "갱신 870건" in rows[0]["message"]
+    with dbm.get_session_factory()() as s:
+        f = kpi.freshness(s)
+        assert f["last_failed"] is False and f["last_success"] is None   # 수집 이력은 그대로

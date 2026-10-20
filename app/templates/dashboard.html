@@ -29,10 +29,13 @@
     <div class="sub">로봇 누락 사유 기록 {{ m.miss_n }}건</div>
   </div>
   <div class="card">
-    <div class="k">상점 로봇배송 동의 <span class="badge">로드샵 기준</span></div>
-    <div class="v">{{ m.consent_shop_pct | num(1) }}<small>%</small></div>
-    <div class="sub">동의 {{ m.consent_shops }} · 미동의 {{ m.noconsent_shops }} · 미응답 {{ m.noresp_shops }} / 상점 {{ m.consent_shop_base }}곳</div>
-    <div class="sub">동의 상점 주문 {{ m.consent_order_n }} / {{ m.consent_order_base }}건 ({{ m.consent_order_pct | num(1, '%') }})</div>
+    <div class="k">동의 상점 주문 비중 <span class="badge">로드샵 기준</span></div>
+    <div class="v">{{ m.consent_order_pct | num(1) }}<small>%</small></div>
+    <div class="delta">동의 상점 주문 {{ m.consent_order_n }} / {{ m.consent_order_base }}건 · {{ p.label }}</div>
+    <div class="sub" title="상점 수 기준입니다. 주문이 많은 상점이 먼저 동의하는 경향이 있어 주문 비중보다 낮게 나옵니다.">
+      상점 기준 {{ m.consent_shop_pct | num(1, '%') }} — 동의 {{ m.consent_shops }} · 미동의 {{ m.noconsent_shops }} · 미응답 {{ m.noresp_shops }} / 상점 {{ m.consent_shop_base }}곳
+      · <a href="/stores">기간별로 보기</a>
+    </div>
     {% if m.area_base %}
     <div class="sub" style="border-top:1px solid var(--border);margin-top:6px;padding-top:6px"
          title="모수가 다릅니다. 위는 이 기간 이 단지에 주문이 있었던 상점, 아래는 주문과 무관한 수원시 승인 로드샵 전체(영업 대상)입니다.">
