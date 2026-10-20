@@ -206,12 +206,13 @@ def orders(request: Request, grain: str = "day", d: str | None = None,
 
 @app.get("/stores", response_class=HTMLResponse)
 def stores(request: Request, st: str | None = None, q: str | None = None, page: int = 1,
-           sort: str | None = None, sdir: str = Query("desc", alias="dir"), db=Depends(get_db)):
-    """상점 동의 현황. 기간 선택 없이 '최근 1개월' 고정이라 상단 기간 바를 쓰지 않는다."""
+           sort: str | None = None, sdir: str = Query("desc", alias="dir"),
+           rng: str | None = None, db=Depends(get_db)):
+    """상점 동의 현황. 기간은 액티브 판정에만 쓰고 선택지가 따로 있어 상단 기간 바를 쓰지 않는다."""
     p = _period_ctx("day", None, None, None)
     ctx = _common(request, p, db, "stores")
     # 결과는 ctx 에 풀지 않고 s 아래 둔다 — 'active' 같은 키가 네비게이션 변수와 부딪힌다
-    ctx.update(s=kpi.store_status(db, st=st, q=q, page=page, sort=sort, desc=sdir != "asc"),
+    ctx.update(s=kpi.store_status(db, st=st, q=q, page=page, sort=sort, desc=sdir != "asc", rng=rng),
                st=st or "", q=q or "", sort=sort or "", sdir=sdir,
                consent_query_id=os.getenv("REDASH_CONSENT_QUERY_ID", "").strip() or None)
     return templates.TemplateResponse(request, "stores.html", ctx)
