@@ -669,8 +669,16 @@ def dashboard(session, p: Period) -> dict:
     m = compute_metrics(rows, notes)            # 내부에서 제외 건 반영
     # 동의 현황: 주문 기준 집계를 상점 명부로 한 번 보정하고(과거 수집분의 NULL 메우기),
     # 명부 기준(수원시 전체) 숫자를 따로 붙인다.
-    m.update(consent_stats(rows, consent_by_store(session)))
+    roster = consent_by_store(session)
+    m.update(consent_stats(rows, roster))
     m.update(area_consent_stats(session))
+    # 동의 주문 비중은 기간이 짧으면 표본이 몇 건뿐이라 100%/0% 로 튄다(주 1일차에 9건이면
+    # 100% 로 찍힌다). 그래서 선택 기간과 별개로 최근 30일 고정 창 값을 같이 내고 화면은
+    # 그쪽을 헤드라인으로 쓴다. 선택 기간 값은 바로 아래 줄에 그대로 남긴다.
+    c_end = data_end(date.today())
+    c_start = c_end - timedelta(days=STORE_DAYS - 1)
+    m["consent30"] = {**consent_stats(scoped_done(session, c_start, c_end), roster),
+                      "date_from": c_start, "date_to": c_end, "days": STORE_DAYS}
     # 특이사항 카드는 목록과 맞추기 위해 미완료 로봇 건도 포함 (다른 지표는 완료 건 기준 그대로)
     unf = unfinished_robots(session, p.start, p.eff_end)
     m.update(annotation_counts(rows + unf, notes))
