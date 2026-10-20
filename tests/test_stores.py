@@ -183,3 +183,20 @@ def test_range_chips_and_order_in_page(client):
     assert page.index("액티브 상점") < page.index("주문 유무와 무관한 전체 명부")
     assert 'href="/stores?rng=all"' in page
     assert "rng=poc" in client.get("/stores?rng=poc", headers=h).text
+
+
+def test_active_excludes_b2b(session):
+    """액티브는 로드샵만. B2B(주문처 단위)는 상점 단위 동의 대상이 아니라 전부 '미응답' 으로
+    잡혀, 같이 세면 액티브 동의율이 실제보다 낮게 보인다."""
+    session.merge(store("S1", "동의"))
+    session.merge(store("S2", "미응답", store_type="B2B"))
+    session.add_all([order("D1", "S1", date(2026, 10, 18)), order("D2", "S2", date(2026, 10, 18))])
+    session.commit()
+
+    r = kpi.store_status(session, today=TODAY)
+    assert r["all"]["base"] == 2                        # 전체 명부에는 B2B 도 들어간다
+    assert r["active"]["base"] == 1                     # 액티브는 로드샵만
+    assert (r["active"]["ok"], r["active"]["ok_pct"]) == (1, 100.0)
+    assert r["active"]["none"] == 0                     # B2B 미응답이 섞이면 50% 로 떨어진다
+    # 표는 필터대로 B2B 도 보여준다(액티브 카드만 로드샵 기준)
+    assert len(kpi.store_status(session, today=TODAY, st="b2b")["rows"]) == 1

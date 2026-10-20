@@ -301,7 +301,10 @@ def store_status(session, today: date | None = None, st: str | None = None, q: s
     kinds = {"loadshop": LOADSHOP, "b2b": "B2B"}
     if st in kinds:
         rows = [r for r in rows if r["store_type"] == kinds[st]]
-    stat = {"all": _share(rows), "active": _share([r for r in rows if r["orders"] > 0]), "gap": gap}
+    # 액티브는 로드샵만 센다 — B2B(요기요·스타벅스 등 주문처 단위)는 상점 단위 동의 대상이
+    # 아니라 전부 '미응답' 으로 잡혀, 같이 세면 액티브 동의율이 실제보다 낮게 보인다.
+    stat = {"all": _share(rows), "gap": gap,
+            "active": _share([r for r in rows if r["orders"] > 0 and r["store_type"] == LOADSHOP])}
     stat["type_mix"] = {k: sum(1 for r in rows if r["store_type"] == v) for k, v in kinds.items()}
 
     shown = rows
