@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 
 from .collector import CollectError, backfill_consent, orders_date_range, run_collect
+from .collector import log as write_collect_log
 from .db import CollectLog, get_session_factory
 
 log = logging.getLogger("dashboard.scheduler")
@@ -58,8 +59,10 @@ def collect_once(force_full: bool = False) -> bool:
 def consent_backfill_once() -> bool:
     """이미 쌓인 주문 전 기간에 상점로봇동의상태만 채운다. 수집과 같은 락을 쓴다(동시 실행 금지).
 
-    collect_log 에는 남기지 않는다 — 수집이 아니므로 '마지막 수집 시각'을 움직이면 안 된다.
-    결과는 STATE["last_consent"] 로 /admin/import 화면에 보여준다.
+    결과는 STATE["last_consent"] 로 /admin/import 화면에 보여주는데, 그건 프로세스 메모리라
+    재배포하면 사라진다. 그래서 collect_log 에도 status='info' 로 한 줄 남긴다 — 'success' 로
+    남기면 kpi.freshness 의 '마지막 수집 시각' 이 실제 수집과 무관하게 갱신되고, 'fail' 로
+    남기면 화면이 '수집 실패' 로 보인다. info 는 둘 다 건드리지 않으면서 로그 표에는 남는다.
     """
     if not _run_lock.acquire(blocking=False):
         return False
@@ -69,6 +72,7 @@ def consent_backfill_once() -> bool:
             lo, hi = orders_date_range(s)
         if lo is None:
             STATE["last_consent"] = "raw_orders 가 비어 있어 건너뜀 — 먼저 수집을 돌려주세요"
+            write_collect_log("info", 0, "동의상태 백필: raw_orders 가 비어 있어 건너뜀")
             return True
         log.info("동의상태 백필 시작 %s~%s", lo, hi)
         st = backfill_consent(lo, hi)
@@ -79,9 +83,11 @@ def consent_backfill_once() -> bool:
         if st["failed"]:
             msg += f" · 실패 {len(st['failed'])}개월"
         STATE["last_consent"] = msg
+        write_collect_log("info", st["updated"], f"동의상태 백필: {msg}")
         log.info("동의상태 백필 완료 %s", msg)
     except CollectError as e:
         STATE["last_error"] = str(e)[:300]
+        write_collect_log("info", 0, f"동의상태 백필 실패: {str(e)[:200]}")
         log.error("동의상태 백필 실패: %s", e)
     except Exception as e:              # noqa: BLE001 — 스레드는 죽지 않게 한다
         STATE["last_error"] = f"{type(e).__name__}: {str(e)[:250]}"
