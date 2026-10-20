@@ -75,6 +75,64 @@
   {%- endif %}
 </div>
 
+{% set g2 = s.targets %}
+{% if st != 'b2b' %}
+<div class="group-title">우선 공략 대상 <span class="badge warn">동의 전환</span><span style="font-weight:400;color:var(--muted)">
+  로드샵 미동의·미응답 중 <b>주문이 나오는</b> 상점 · 주문건수 순</span></div>
+{% if g2.shops %}
+<div class="cards">
+  <div class="card">
+    <div class="k">공략 대상</div>
+    <div class="v">{{ g2.shops }}<small>곳</small></div>
+    <div class="delta">미동의 {{ g2.no_n }} · 미응답 {{ g2.none_n }}</div>
+    <div class="sub">주문이 없는 상점은 뺐습니다 — 설득해도 당장 바뀌는 주문이 없습니다</div>
+  </div>
+  <div class="card">
+    <div class="k">걸려 있는 주문</div>
+    <div class="v">{{ g2.orders }}<small>건</small></div>
+    <div class="delta">로드샵 주문의 {{ g2.share_pct | num(1, '%') }}</div>
+    <div class="sub">전환에 성공하면 로봇 배송 후보가 되는 물량</div>
+  </div>
+  <div class="card">
+    <div class="k">먼저 칠 곳</div>
+    <div class="v">{{ g2.half_n }}<small>곳</small></div>
+    <div class="delta">이 그룹 주문의 절반을 덮습니다</div>
+    <div class="sub">아래 표에서 <b>주문건수가 강조된 줄</b>입니다</div>
+  </div>
+</div>
+<div class="tablewrap" style="margin-top:12px">
+<table class="list">
+  <thead><tr><th class="num">순위</th><th>상점이름</th><th>동의여부</th>
+    <th class="num">최종 변경일</th><th class="num">주문건수</th><th class="num">주문 누적</th></tr></thead>
+  <tbody>
+  {% for r in g2.rows %}
+  <tr>
+    <td class="num mut">{{ loop.index }}</td>
+    <td>{{ r.store_name or '-' }}<div class="mut">{{ r.store_id }}</div></td>
+    <td><span class="badge warn">{{ r.consent }}</span>
+      {%- if r.changed_after %} <span class="mut" title="최초 응답 이후 상태가 바뀐 상점입니다">변경</span>{% endif -%}
+    </td>
+    <td class="num">{{ r.last_changed_date or '-' }}</td>
+    <td class="num {{ 'hot' if r.in_half else 'tot' }}">{{ r.orders }}</td>
+    <td class="num mut">{{ r.cum_pct | num(1, '%') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<div class="sub" style="margin:6px 2px 0">
+  기간은 위 액티브 상점과 같습니다({{ s.date_from }} ~ {{ s.date_to }}).
+  {%- if g2.truncated %} 대상이 {{ g2.shops }}곳이라 상위 {{ g2.rows | length }}곳만 보입니다.{% endif %}
+  미응답은 아직 한 번도 응답하지 않은 상점이라 안내만으로 전환되는 경우가 있고, 미동의는 거절 사유 확인이 먼저입니다 —
+  <b>최종 변경일</b>이 오래된 미동의는 당시 사정이 바뀌었을 수 있습니다.
+</div>
+{% else %}
+<div class="card empty">
+  이 기간에는 공략 대상이 없습니다 — 주문이 나온 로드샵이 모두 동의 상태입니다.
+</div>
+{% endif %}
+{% endif %}
+
 <div class="group-title">상점 현황<span style="font-weight:400;color:var(--muted)">
   {{ '로드샵만' if st == 'loadshop' else ('B2B만' if st == 'b2b' else '로드샵 + B2B') }} · 주문 유무와 무관한 전체 명부(영업 대상)</span></div>
 <div class="cards">

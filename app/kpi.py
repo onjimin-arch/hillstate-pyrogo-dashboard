@@ -239,6 +239,36 @@ def _share(rows: list[dict]) -> dict:
     return out
 
 
+TARGET_MAX = 100            # 공략 대상 표에 보일 최대 줄 수. 넘으면 상위만 보이고 수만 알린다
+
+
+def consent_targets(rows: list[dict], loadshop_orders: int) -> dict:
+    """동의 전환 대상: 로드샵 중 '주문은 나오는데' 미동의·미응답인 상점, 주문건수 순.
+
+    미응답 상점 대부분은 주문 자체가 없어 설득해도 당장 바뀌는 게 없다. 주문이 도는 곳만
+    추려야 영업 우선순위가 된다. 누적 비율은 이 대상 그룹 안에서의 비중이다 —
+    상위 몇 곳만 잡아도 이 그룹 주문의 절반이 덮인다는 걸 보려는 것.
+    """
+    picked = sorted([r for r in rows if r["store_type"] == LOADSHOP and r["orders"] > 0
+                     and r["consent"] in (CONSENT_NO, CONSENT_NONE)],
+                    key=lambda r: (-r["orders"], r["store_id"]))
+    total = sum(r["orders"] for r in picked)
+    out, run = [], 0
+    for r in picked:
+        before = run
+        run += r["orders"]
+        out.append({**r, "cum": run,
+                    "cum_pct": round(run / total * 100, 1) if total else None,
+                    # 누적 50% 를 채우는 최소 앞부분 — 여기까지가 '먼저 칠 곳'
+                    "in_half": total > 0 and before < total / 2})
+    return {"rows": out[:TARGET_MAX], "shops": len(out), "orders": total,
+            "truncated": max(len(out) - TARGET_MAX, 0),
+            "half_n": sum(1 for r in out if r["in_half"]),
+            "no_n": sum(1 for r in out if r["consent"] == CONSENT_NO),
+            "none_n": sum(1 for r in out if r["consent"] == CONSENT_NONE),
+            "share_pct": round(total / loadshop_orders * 100, 1) if loadshop_orders else None}
+
+
 def store_range(session, rng: str | None, today: date) -> tuple[date, date, str]:
     """액티브 판정 기간. (시작, 끝, 선택키). 끝은 항상 D-1."""
     end = data_end(today)
@@ -305,6 +335,8 @@ def store_status(session, today: date | None = None, st: str | None = None, q: s
     # 아니라 전부 '미응답' 으로 잡혀, 같이 세면 액티브 동의율이 실제보다 낮게 보인다.
     stat = {"all": _share(rows), "gap": gap,
             "active": _share([r for r in rows if r["orders"] > 0 and r["store_type"] == LOADSHOP])}
+    stat["targets"] = consent_targets(
+        rows, sum(r["orders"] for r in rows if r["store_type"] == LOADSHOP))
     stat["type_mix"] = {k: sum(1 for r in rows if r["store_type"] == v) for k, v in kinds.items()}
 
     shown = rows
