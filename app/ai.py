@@ -2,7 +2,7 @@
 
 AI는 숫자를 직접 만들지 않고 두 도구로만 데이터를 조회한다.
   - get_kpi   : 대시보드와 동일한 집계 로직(집계 제외 반영)
-  - query_sql : 읽기 전용 SELECT (허용된 뷰 ai_orders / ai_robot_notes 만 접근)
+  - query_sql : 읽기 전용 SELECT (허용된 뷰 ai_orders / ai_robot_notes / ai_stores 만 접근)
 라이더ID·원본 JSON은 뷰에서 제외해 외부(OpenAI)로 나가지 않게 한다.
 """
 import json
@@ -19,7 +19,7 @@ from sqlglot import exp
 from . import kpi
 from .config import CFG
 
-VIEWS = {"ai_orders", "ai_robot_notes"}
+VIEWS = {"ai_orders", "ai_robot_notes", "ai_stores"}
 MAX_ROWS = 200
 MAX_STEPS = 6
 SQL_TIMEOUT_SEC = 3
@@ -65,6 +65,12 @@ def ensure_views(session) -> None:
         CREATE VIEW ai_robot_notes AS SELECT
           delivery_id, result_type, note, exclude_from_kpi, updated_at, updated_by
         FROM robot_order_notes"""))
+    conn.execute(text("DROP VIEW IF EXISTS ai_stores"))
+    conn.execute(text("""
+        CREATE VIEW ai_stores AS SELECT
+          store_id, store_name, store_type, manage_agency, consent,
+          first_response_date, agreed_at, last_changed_date, changed_after_response
+        FROM store_consent"""))
     session.commit()
 
 
@@ -75,7 +81,7 @@ def _authorizer(action, arg1, arg2, dbname, source):
     if action == sqlite3.SQLITE_READ:
         if arg1 in VIEWS or source in VIEWS:      # 뷰 직접 조회 또는 뷰 내부 전개
             return sqlite3.SQLITE_OK
-        if arg1 in ("raw_orders", "robot_order_notes") and not arg2:
+        if arg1 in ("raw_orders", "robot_order_notes", "store_consent") and not arg2:
             return sqlite3.SQLITE_OK              # COUNT(*) 계획용 컬럼 없는 접근(값 노출 없음)
         return sqlite3.SQLITE_DENY
     return sqlite3.SQLITE_DENY
@@ -236,7 +242,12 @@ ai_orders(주문 1건 1행): delivery_id, order_id, robot_delivery_id, ord_date(
   in_kpi_scope (1=건수·이용률·성공률 모수: 이 단지+로드샵·B2B+완료+집계 제외 아님),
   in_time_scope (1=평균 시간·적시 배송률 모수: in_kpi_scope 이면서 result_type이 '완료(오류)'가 아님)
 ai_robot_notes(사용자 입력 원본): delivery_id, result_type, note, exclude_from_kpi, updated_at, updated_by
-- 두 뷰는 delivery_id로 조인한다. 결과는 최대 {MAX_ROWS}행이므로 집계(GROUP BY)를 활용한다.
+ai_stores(상점 1곳 1행 — 상점 명부, 주문과 별개 쿼리): store_id, store_name, store_type('일반(로드샵)'|'B2B'), manage_agency,
+  consent('동의'|'미동의'|'미응답'), first_response_date, agreed_at, last_changed_date, changed_after_response('Y'=응답 후 번복·철회)
+- 모수가 '수원시 승인 상점 전체 + 이 단지에 주문이 있던 상점' 이라 주문이 한 건도 없는 상점도 들어 있다.
+  "동의한 상점 수" 처럼 상점을 세는 질문은 ai_orders 가 아니라 이 뷰로 센다(ai_orders 는 주문이 있는 상점만 보인다).
+  '액티브 상점' 은 ai_orders 와 store_id 로 조인해 그 기간 주문이 1건 이상인 상점이다. 상태는 현재값이며 과거 시점은 last_changed_date 로 가늠한다.
+- ai_orders 와 ai_robot_notes 는 delivery_id로, ai_stores 는 store_id로 조인한다. 결과는 최대 {MAX_ROWS}행이므로 집계(GROUP BY)를 활용한다.
 """
 
 
@@ -252,7 +263,7 @@ TOOLS = [
             "required": ["grain"]}}},
     {"type": "function", "function": {
         "name": "query_sql",
-        "description": "읽기 전용 PostgreSQL SELECT. ai_orders, ai_robot_notes 뷰만 조회 가능. 한 번에 한 문장.",
+        "description": "읽기 전용 PostgreSQL SELECT. ai_orders, ai_robot_notes, ai_stores 뷰만 조회 가능. 한 번에 한 문장.",
         "parameters": {"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}}},
 ]
 

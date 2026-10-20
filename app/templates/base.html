@@ -18,6 +18,7 @@
   'dashboard': ('대시보드', cfg.building ~ ' · 로봇연계 배송 KPI'),
   'robots': ('로봇 배송 건', '로봇연계 건별 결과 구분 · 특이사항 · 집계 제외 입력'),
   'orders': ('전체 주문', '전체 주문 목록과 로봇 누락 사유 입력'),
+  'stores': ('상점 현황', '상점별 로봇배송 동의 여부와 최근 1개월 주문'),
   'ask': ('AI 질문', '대시보드 집계 기준으로 답하는 질의응답'),
   'settings': ('설정', '내 계정 · 사용자 관리'),
   'import': ('데이터 가져오기', 'SQLite 파일 이관 · Redash 수집 상태'),
@@ -32,6 +33,7 @@
       <a href="/" class="nav-item {{ 'active' if active == 'dashboard' }}"><span class="ic">🏠</span>대시보드</a>
       <a href="/robots" class="nav-item {{ 'active' if active == 'robots' }}"><span class="ic">🤖</span>로봇 배송 건</a>
       <a href="/orders" class="nav-item {{ 'active' if active == 'orders' }}"><span class="ic">📋</span>전체 주문</a>
+      <a href="/stores" class="nav-item {{ 'active' if active == 'stores' }}"><span class="ic">🏪</span>상점 현황</a>
       <a href="/ask" class="nav-item {{ 'active' if active == 'ask' }}"><span class="ic">💬</span>AI 질문</a>
       <div class="nav-sec">설정</div>
       <a href="/settings" class="nav-item {{ 'active' if active == 'settings' }}"><span class="ic">⚙️</span>설정</a>
