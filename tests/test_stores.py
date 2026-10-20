@@ -200,3 +200,38 @@ def test_active_excludes_b2b(session):
     assert r["active"]["none"] == 0                     # B2B 미응답이 섞이면 50% 로 떨어진다
     # 표는 필터대로 B2B 도 보여준다(액티브 카드만 로드샵 기준)
     assert len(kpi.store_status(session, today=TODAY, st="b2b")["rows"]) == 1
+
+
+def test_consent_targets_picks_ordering_shops_only(session):
+    """공략 대상 = 로드샵 미동의·미응답 중 '주문이 나오는' 상점. 주문 없는 상점은 뺀다
+    (설득해도 당장 바뀌는 주문이 없다). 누적 비율과 '절반을 덮는 앞부분'을 같이 센다."""
+    for sid, c in [("S1", "미동의"), ("S2", "미응답"), ("S3", "미동의"), ("S4", "미동의"),
+                   ("S5", "동의"), ("B1", "미동의")]:
+        session.merge(store(sid, c, store_type="B2B" if sid == "B1" else "일반(로드샵)"))
+    o = 0
+    for sid, n in [("S1", 6), ("S2", 3), ("S3", 1), ("S5", 20), ("B1", 9)]:   # S4 는 주문 없음
+        for _ in range(n):
+            o += 1
+            session.add(order(f"D{o}", sid, date(2026, 10, 18)))
+    session.commit()
+
+    t = kpi.store_status(session, today=TODAY)["targets"]
+    assert [r["store_id"] for r in t["rows"]] == ["S1", "S2", "S3"]   # 주문 순, S4·S5·B1 제외
+    assert (t["shops"], t["orders"]) == (3, 10)
+    assert (t["no_n"], t["none_n"]) == (2, 1)
+    assert t["share_pct"] == round(10 / 30 * 100, 1)                  # 로드샵 주문 30건 중 10건
+    assert [r["cum_pct"] for r in t["rows"]] == [60.0, 90.0, 100.0]
+    assert t["half_n"] == 1 and [r["in_half"] for r in t["rows"]] == [True, False, False]
+
+
+def test_consent_targets_section_in_page(client):
+    h = jwt("jmlee@barogo.com")
+    SL = dbm.get_session_factory()
+    with SL() as s:
+        s.merge(store("S1", "미동의", name="가상떡볶이"))
+        s.add(order("D1", "S1", date.today() - timedelta(days=2)))
+        s.commit()
+    page = client.get("/stores", headers=h).text
+    assert "우선 공략 대상" in page and "가상떡볶이" in page
+    assert page.index("액티브 상점") < page.index("우선 공략 대상") < page.index("주문 유무와 무관한 전체 명부")
+    assert "먼저 칠 곳" in page                      # 절반을 덮는 앞부분 카드
