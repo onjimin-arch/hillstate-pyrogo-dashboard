@@ -60,21 +60,6 @@
 </div>
 {% endif %}
 
-{% set g = s.gap %}
-<div class="{{ 'excl-note' if (g.no_store_id or g.orphan_orders) else 'sub' }}" style="margin:8px 2px 0">
-  이 기간 주문 <b>{{ g.orders_total }}건</b> 중 <b>{{ g.counted_orders }}건</b>을 액티브 판정에 썼습니다.
-  {%- if g.agency_orders %} 주문처 단위 B2B(상점ID가 0 — 요기요 등) {{ g.agency_orders }}건은 상점이 아니라 제외합니다.{% endif %}
-  {%- if g.no_store_id %}
-  <br>⚠ <b>상점ID 없이 수집된 주문 {{ g.no_store_id }}건</b> — 어느 상점인지 알 수 없어 액티브에서 빠집니다.
-  상점ID 컬럼이 Redash 쿼리에 추가되기 전에 수집된 건들입니다.
-  {% if can_import %}<a href="/admin/import">데이터 가져오기</a>의 「동의상태만 채우기」를 돌리면 상점ID도 같이 채워집니다.{% else %}관리자에게 「동의상태만 채우기」 실행을 요청하세요.{% endif %}
-  {%- endif %}
-  {%- if g.orphan_orders %}
-  <br>⚠ <b>명부에 없는 상점 {{ g.orphan_shops }}곳({{ g.orphan_orders }}건)</b> — 주문은 있는데 상점 명부에 없습니다.
-  명부 모수가 '수원시 승인 상점'이라 승인이 풀렸거나 주소가 수원시 밖인 상점은 빠져, 그만큼 액티브가 적게 잡힙니다.
-  {%- endif %}
-</div>
-
 {% set g2 = s.targets %}
 {% if st != 'b2b' %}
 <div class="group-title">우선 공략 대상 <span class="badge warn">동의 전환</span><span style="font-weight:400;color:var(--muted)">
