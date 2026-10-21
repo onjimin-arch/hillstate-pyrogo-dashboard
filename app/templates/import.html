@@ -33,7 +33,12 @@
     <b>호수(세대)는 저장하지 않습니다</b> — 개별 배송지라 수집 대상이 아닙니다.
   </div>
   <form class="imp-form" hx-post="/admin/trips/upload" hx-encoding="multipart/form-data"
-        hx-target="#trips-msg" hx-swap="innerHTML">
+        hx-target="#trips-msg" hx-swap="innerHTML"
+        hx-on::before-request="document.getElementById('trips-msg').textContent = '올리는 중…'"
+        hx-on::response-error="var d = ''; try { d = JSON.parse(event.detail.xhr.responseText).detail; } catch (x) {}
+                               var m = document.getElementById('trips-msg');
+                               m.textContent = '실패: ' + (d || event.detail.xhr.status); m.className = 'sub bad'"
+        hx-on::after-swap="if (!event.detail.failed) document.getElementById('trips-msg').className = 'sub'">
     <input type="file" name="file" accept=".csv,.xlsx,.xls" required>
     <button type="submit">올리기</button>
   </form>
