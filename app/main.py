@@ -265,7 +265,8 @@ def save_note(request: Request, delivery_id: str, result_type: str = Form(""),
     log.info("robot note saved delivery_id=%s by=%s", delivery_id, n.updated_by)
     return templates.TemplateResponse(
         request, "_robot_row.html",
-        {"r": kpi.row_view(o, n), "result_types": kpi.RESULT_TYPES, "saved": True})
+        {"r": kpi.row_view(o, n, kpi.dong_for(db, o)), "result_types": kpi.RESULT_TYPES,
+         "saved": True})
 
 
 @app.get("/ask", response_class=HTMLResponse)
@@ -310,9 +311,10 @@ async def upload_trips(request: Request, file: UploadFile = File(...),
         raise HTTPException(400, str(e))
     n = neubility.upsert(db, trips, user)
     log.info("robot_trips upload rows=%d by=%s file=%s", n, user, file.filename)
+    cov = kpi.dong_coverage(db, stat["date_from"], stat["date_to"])
     return templates.TemplateResponse(request, "_trips_result.html",
                                       {"request": request, "n": n, "stat": stat,
-                                       "fname": file.filename})
+                                       "cov": cov, "fname": file.filename})
 
 
 @app.get("/admin/import/status")

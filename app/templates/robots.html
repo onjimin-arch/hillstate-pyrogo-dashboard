@@ -7,6 +7,8 @@
   (성공·건수에는 포함, <u>평균 시간·적시 배송률에서만 제외</u>) · <b>실패</b> · <b>기타</b>(성공률 분모에서 제외).
   <b>집계 제외</b>를 체크한 건은 모든 집계(건수·이용률·시간·품질·차트)에서 빠집니다.
   실패 건은 제외하지 말고 '실패'로 기록하세요(성공률이 부풀려집니다).
+  <b>동</b>은 뉴빌리티 시트 업로드분(<a href="/admin/import">데이터 가져오기</a>)에서 로봇·시각으로 맞춘 값이라,
+  시트를 올리지 않은 구간은 '-' 입니다.
   <label style="margin-left:8px">입력자 <input type="text" id="editor" placeholder="이름" size="8"></label>
 </p>
 <div class="controls">
@@ -23,11 +25,11 @@
 <table class="list">
   <thead><tr>
     <th>접수</th><th>로봇</th><th>주문처 / 상점</th><th>상점구분</th><th>접수→완료</th>
-    <th>적재함닫힘→완료</th><th>배차횟수</th><th>결과 구분</th><th>특이사항</th><th>집계 제외</th><th>수정</th>
+    <th>적재함닫힘→완료</th><th>동</th><th>배차횟수</th><th>결과 구분</th><th>특이사항</th><th>집계 제외</th><th>수정</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}{% include "_robot_row.html" %}{% else %}
-  <tr><td colspan="11" class="empty">조건에 맞는 로봇 배송 건이 없습니다.</td></tr>
+  <tr><td colspan="12" class="empty">조건에 맞는 로봇 배송 건이 없습니다.</td></tr>
   {% endfor %}
   </tbody>
 </table>
