@@ -1,5 +1,6 @@
 """기간 해석 + KPI 집계 (설계서 §1-6, §1-8)."""
 import calendar
+import re
 import statistics
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -725,10 +726,12 @@ def robot_list(session, p: Period, flt: str | None = None) -> list[dict]:
                                 RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)
          .order_by(RawOrder.ord_dt.desc()))
     notes = load_notes(session)
+    orders = list(session.scalars(q))
+    dongs = dong_map(session, orders)
     out = []
-    for o in session.scalars(q):
+    for o in orders:
         n = notes.get(o.delivery_id)
-        row = row_view(o, n)
+        row = row_view(o, n, dongs.get(o.delivery_id))
         out.append(row)
     if flt == "noted":
         out = [r for r in out if r["note"] or r["exclude"] or r["result_type"] not in ("", "정상")]
@@ -741,11 +744,12 @@ def robot_list(session, p: Period, flt: str | None = None) -> list[dict]:
     return out
 
 
-def row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
+def row_view(o: RawOrder, n: RobotOrderNote | None, dong: str | None = None) -> dict:
     thr = CFG["timely_threshold_sec"]
     hand = o.s_dockclose_robotfinish
     return {
         "delivery_id": o.delivery_id,
+        "dong": dong,
         "order_id": o.order_id,
         "robot_delivery_id": o.robot_delivery_id,
         "ord_dt": o.ord_dt,
@@ -766,6 +770,91 @@ def row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "updated_at": n.updated_at if n else None,
         "updated_by": n.updated_by if n else None,
     }
+
+
+# ---------------------------------------------------------------- 동(배송지 동) 붙이기
+# 시트가 분 단위라 Redash 시각과 수십 초 어긋난다. 완전일치로는 거의 못 맞추므로 허용 오차를 둔다.
+# 3분: 같은 로봇의 다음 회전은 최소 10분 이상 걸리므로 이 폭에서 옆 회차와 헷갈리지 않는다.
+DONG_TOL_SEC = 180
+
+
+def _robot_key(v: str | None) -> str | None:
+    """로봇 표기에서 번호만. Redash 는 `바로고 3호기 [231호기]`, 시트는 `229` 처럼 적는다 —
+    대괄호 안(=실제 호기 번호)이 맨 뒤에 오므로 마지막 숫자 묶음을 쓴다."""
+    nums = re.findall(r"\d+", v or "")
+    return nums[-1] if nums else None
+
+
+def _pair_cost(o: RawOrder, t: RobotTrip) -> float | None:
+    """같은 건으로 볼 수 있으면 시각 차이(초) 평균, 아니면 None. 겹치는 시각이 둘(적재함닫힘·
+    로봇배송완료) 다 있으면 둘 다 오차 안에 들어야 한다 — 한쪽만 맞는 우연한 일치를 줄인다."""
+    diffs = []
+    for a, b in ((o.dock_close_dt, t.dock_close_dt), (o.robot_finish_dt, t.robot_finish_dt)):
+        if a is not None and b is not None:
+            diffs.append(abs((a - b).total_seconds()))
+    if not diffs or max(diffs) > DONG_TOL_SEC:
+        return None
+    return sum(diffs) / len(diffs)
+
+
+def match_trips(orders: list[RawOrder], trips: list[RobotTrip]) -> dict[str, RobotTrip]:
+    """주문 ↔ 뉴빌리티 시트 행 짝짓기. 오차가 작은 짝부터 확정하고 한 행은 한 주문에만 쓴다."""
+    trips = [t for t in trips if t.dock_close_dt or t.robot_finish_dt]
+    if not trips:
+        return {}
+    okeys = {_robot_key(o.robot_name) for o in orders} - {None}
+    tkeys = {_robot_key(t.robot_id) for t in trips} - {None}
+    # 양쪽 번호가 하나도 안 겹치면 표기 체계가 다른 것이다(예: 시트가 `3호기`, Redash 가 `231호기`).
+    # 그럴 때 로봇 조건을 걸면 전부 못 맞추므로 시각만으로 맞춘다.
+    use_robot = bool(okeys & tkeys)
+    cand = []
+    for o in orders:
+        ok = _robot_key(o.robot_name)
+        for t in trips:
+            if use_robot and ok and _robot_key(t.robot_id) and ok != _robot_key(t.robot_id):
+                continue
+            c = _pair_cost(o, t)
+            if c is not None:
+                cand.append((c, o.delivery_id, t))
+    cand.sort(key=lambda x: x[0])
+    used_o: set[str] = set()
+    used_t: set[str] = set()
+    out: dict[str, RobotTrip] = {}
+    for _, did, t in cand:
+        if did in used_o or t.trip_key in used_t:
+            continue
+        used_o.add(did)
+        used_t.add(t.trip_key)
+        out[did] = t
+    return out
+
+
+def dong_map(session, orders: list[RawOrder]) -> dict[str, str]:
+    """{배달ID: 동}. 시트 업로드분이 없는 구간은 비어 있다(화면에는 '-')."""
+    days = {o.ord_dt.date() for o in orders if o.ord_dt}
+    if not days:
+        return {}
+    # 심야 건은 시트의 일자(운행일)와 접수일이 하루 어긋날 수 있어 앞뒤 하루를 함께 읽는다.
+    lo, hi = min(days) - timedelta(days=1), max(days) + timedelta(days=1)
+    trips = list(session.scalars(
+        select(RobotTrip).where(RobotTrip.ord_date >= lo, RobotTrip.ord_date <= hi,
+                                RobotTrip.dong.is_not(None))))
+    return {did: t.dong for did, t in match_trips(orders, trips).items() if t.dong}
+
+
+def dong_for(session, o: RawOrder) -> str | None:
+    """한 건만(행 저장 후 다시 그릴 때)."""
+    return dong_map(session, [o]).get(o.delivery_id)
+
+
+def dong_coverage(session, s: date, e: date) -> dict:
+    """업로드 직후 '몇 건에 동이 붙었나'. 시트 로봇 표기나 시각이 어긋나면 여기서 바로 드러난다."""
+    lo, hi = _bounds(s, e)
+    orders = list(session.scalars(
+        select(RawOrder).where(RawOrder.building == CFG["building"],
+                               RawOrder.delivery_type == ROBOT,
+                               RawOrder.ord_dt >= lo, RawOrder.ord_dt < hi)))
+    return {"orders": len(orders), "matched": len(dong_map(session, orders))}
 
 
 # ---------------------------------------------------------------- 로봇 복귀·가용률 (뉴빌리티 수기 기록)

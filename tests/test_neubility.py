@@ -1,6 +1,6 @@
 """뉴빌리티 수기 시트 파싱 + 로봇 복귀·가용률."""
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import db as dbm  # noqa: E402
 from app import kpi, neubility as nb  # noqa: E402
+from app.config import CFG  # noqa: E402
 
 # 실제 시트와 같은 열 구성. 헤더 오타('딛힌')와 '-' 결측을 그대로 둔다.
 HDR = ("일자,상태,로봇 ID,가게명,목적지,로봇 매칭 시각,로봇_도킹존 도착시각,"
@@ -140,3 +141,75 @@ def test_upload_rejects_garbage(client):
     bad = b"a,b\n1,2\n"                     # 열 이름이 시트와 다르면 400
     assert client.post("/admin/trips/upload", files={"file": ("x.csv", bad, "text/csv")},
                        headers=h).status_code == 400
+
+
+# ---------------------------------------------------------------- 주문 ↔ 시트 동 붙이기
+def _robot_order(did, dock, fin, robot="바로고 3호기 [231호기]"):
+    """로봇 건 한 줄. 시트와 달리 Redash 시각에는 초가 있다."""
+    return dbm.RawOrder(
+        delivery_id=did, building=CFG["building"], delivery_type="로봇연계",
+        store_type=CFG["store_types"][0], delivery_status="DROP_FINISHED",
+        robot_name=robot, ord_dt=dock - timedelta(minutes=20),
+        dock_close_dt=dock, robot_finish_dt=fin,
+        s_dockclose_robotfinish=(fin - dock).total_seconds())
+
+
+def test_dong_matches_across_minute_rounding(session):
+    """시트는 분 단위라 Redash 와 수십 초 어긋난다 — 그래도 같은 건으로 붙어야 한다."""
+    o = _robot_order("D1", datetime(2026, 9, 29, 19, 8, 41), datetime(2026, 9, 29, 19, 14, 12))
+    session.add(o)
+    nb.upsert(session, nb.parse(sheet(row(robot="231", dest="999동 9999호")))[0], "a@barogo.com")
+    assert kpi.dong_map(session, [o]) == {"D1": "999"}
+    assert kpi.row_view(o, None, kpi.dong_for(session, o))["dong"] == "999"
+
+
+def test_dong_empty_when_sheet_missing_or_far_off(session):
+    """시트에 없는 건, 그리고 3분 넘게 어긋난 건에는 붙이지 않는다(옆 회차 오인 방지)."""
+    o1 = _robot_order("D1", datetime(2026, 9, 29, 19, 8, 41), datetime(2026, 9, 29, 19, 14, 12))
+    o2 = _robot_order("D2", datetime(2026, 9, 29, 19, 20, 0), datetime(2026, 9, 29, 19, 26, 0))
+    session.add_all([o1, o2])
+    assert kpi.dong_map(session, [o1, o2]) == {}        # 업로드분 없음
+    nb.upsert(session, nb.parse(sheet(row(robot="231", dest="999동 9999호")))[0], "a@barogo.com")
+    assert kpi.dong_map(session, [o1, o2]) == {"D1": "999"}
+
+
+def test_dong_one_trip_per_order(session):
+    """같은 로봇의 두 회차가 서로 바뀌지 않고, 한 시트 행은 한 주문에만 붙는다."""
+    o1 = _robot_order("D1", datetime(2026, 9, 29, 19, 8, 20), datetime(2026, 9, 29, 19, 14, 50))
+    o2 = _robot_order("D2", datetime(2026, 9, 29, 19, 40, 10), datetime(2026, 9, 29, 19, 46, 30))
+    session.add_all([o1, o2])
+    blob = sheet(row(robot="231", dest="901동 101호", dock_close="19:08", unit_close="19:14",
+                     ret_start="19:15", ret_done="19:18"),
+                 row(robot="231", dest="902동 202호", dock_close="19:40", unit_close="19:46",
+                     ret_start="19:47", ret_done="19:52"))
+    nb.upsert(session, nb.parse(blob)[0], "a@barogo.com")
+    assert kpi.dong_map(session, [o1, o2]) == {"D1": "901", "D2": "902"}
+
+
+def test_dong_matches_when_robot_naming_differs(session):
+    """시트가 `3호기`, Redash 가 `[231호기]` 처럼 번호 체계가 아예 다르면 시각만으로 맞춘다."""
+    o = _robot_order("D1", datetime(2026, 9, 29, 19, 8, 41), datetime(2026, 9, 29, 19, 14, 12))
+    session.add(o)
+    nb.upsert(session, nb.parse(sheet(row(robot="3호기", dest="903동 303호")))[0], "a@barogo.com")
+    assert kpi.dong_map(session, [o]) == {"D1": "903"}
+
+
+def test_dong_respects_robot_when_numbers_line_up(session):
+    """번호 체계가 맞을 때는 로봇이 다르면 붙이지 않는다 — 시각이 비슷해도 다른 로봇 건이다."""
+    o = _robot_order("D1", datetime(2026, 9, 29, 19, 8, 41), datetime(2026, 9, 29, 19, 14, 12),
+                     robot="바로고 1호기 [229호기]")
+    o2 = _robot_order("D2", datetime(2026, 9, 29, 19, 8, 35), datetime(2026, 9, 29, 19, 14, 5),
+                      robot="바로고 3호기 [231호기]")
+    session.add_all([o, o2])
+    blob = sheet(row(robot="229", dest="901동 101호"), row(robot="231", dest="902동 202호"))
+    nb.upsert(session, nb.parse(blob)[0], "a@barogo.com")
+    assert kpi.dong_map(session, [o, o2]) == {"D1": "901", "D2": "902"}
+
+
+def test_dong_coverage_after_upload(session):
+    o = _robot_order("D1", datetime(2026, 9, 29, 19, 8, 41), datetime(2026, 9, 29, 19, 14, 12))
+    o2 = _robot_order("D2", datetime(2026, 9, 29, 21, 0, 0), datetime(2026, 9, 29, 21, 6, 0))
+    session.add_all([o, o2])
+    nb.upsert(session, nb.parse(sheet(row(robot="231", dest="999동 9999호")))[0], "a@barogo.com")
+    assert kpi.dong_coverage(session, date(2026, 9, 29), date(2026, 9, 29)) == {
+        "orders": 2, "matched": 1}

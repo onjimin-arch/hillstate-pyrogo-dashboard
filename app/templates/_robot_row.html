@@ -7,6 +7,7 @@
   <td>{{ r.store_type or '-' }}{% if not r.in_scope %}<div class="mut">집계 모수 아님</div>{% endif %}</td>
   <td>{{ r.total_min | num(1) }}분</td>
   <td class="{{ 'late' if r.late }}">{{ r.hand_min | num(1) }}분{% if r.late %} ▲{% endif %}</td>
+  <td>{% if r.dong %}{{ r.dong }}동{% else %}<span class="mut">-</span>{% endif %}</td>
   <td>{{ r.dispatch_count if r.dispatch_count is not none else '-' }}</td>
   <td>
     <select name="result_type" aria-label="결과 구분">

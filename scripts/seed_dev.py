@@ -114,6 +114,44 @@ def build(base: date):
     return out
 
 
+# 가상 동 번호(실제 단지 동 번호 아님)
+DONGS = ["901", "902", "903", "904"]
+
+
+def robot_trips(orders):
+    """뉴빌리티 시트 업로드분(가상). 로봇 건 리스트의 '동' 과 복귀·가용률을 눈으로 보려는 것.
+
+    실제 시트처럼 분 단위로 자르고(초 버림) 일부 건은 일부러 빼 둔다 — 시트에 없는 건이
+    '-' 로 나오는지 확인해야 한다."""
+    import hashlib
+    rows = []
+    robots = [o for o in orders if o.delivery_type == "로봇연계" and o.robot_finish_dt]
+    for i, o in enumerate(robots):
+        if i % 7 == 0:                 # 7건에 1건은 시트에 없음 → 화면에서 '-'
+            continue
+        dock = o.dock_close_dt.replace(second=0, microsecond=0)
+        fin = o.robot_finish_dt.replace(second=0, microsecond=0)
+        rs = fin + timedelta(seconds=random.randint(30, 240))
+        rd = rs + timedelta(seconds=random.randint(120, 420))
+        rs, rd = rs.replace(second=0), rd.replace(second=0)
+        rows.append(dbm.RobotTrip(
+            trip_key=hashlib.sha1(f"{o.delivery_id}".encode()).hexdigest()[:20],
+            ord_date=dock.date(), robot_id=_robot_num(o.robot_name), status="완료",
+            dong=random.choice(DONGS),
+            dock_close_dt=dock, robot_finish_dt=fin, return_start_dt=rs, return_done_dt=rd,
+            s_dockclose_finish=(fin - dock).total_seconds(),
+            s_finish_return_start=(rs - fin).total_seconds(),
+            s_return=(rd - rs).total_seconds(), s_cycle=(rd - dock).total_seconds(),
+            note=None, uploaded_at=datetime.now(), uploaded_by="seed"))
+    return rows
+
+
+def _robot_num(name):
+    import re
+    nums = re.findall(r"\d+", name or "")
+    return nums[-1] if nums else None
+
+
 def store_consent(base: date):
     """상점 동의 명부(가상). 주문이 없는 상점도 섞어 둔다 — 명부 기준 모수가 주문 기준보다
     넓다는 걸 화면에서 확인하려는 것이다."""
@@ -153,9 +191,12 @@ def main():
             s.merge(o)
         for r in store_consent(base):
             s.merge(r)
+        for t in robot_trips(orders):
+            s.merge(t)
         s.commit()
         n = s.query(dbm.RawOrder).count()
-    print(f"{DB_PATH} · 주문 {n}건 ({base - timedelta(days=13)} ~ {base})")
+        nt = s.query(dbm.RobotTrip).count()
+    print(f"{DB_PATH} · 주문 {n}건 · 시트(뉴빌리티) {nt}건 ({base - timedelta(days=13)} ~ {base})")
     print(f'DATABASE_URL=sqlite:///{DB_PATH.as_posix()}')
 
 
