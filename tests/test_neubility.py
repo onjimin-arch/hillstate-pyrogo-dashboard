@@ -117,6 +117,16 @@ def test_availability_empty_period(session):
     assert kpi.robot_availability(session, p)["n"] == 0
 
 
+def test_day_header_written_as_date():
+    """실제 시트는 A1 이 '일자' 대신 작성일(26.10.18)로 적혀 온다 — 값이 날짜인 열로 찾는다."""
+    blob = sheet(row(), row(day="26.09.30", dock_close="20:15", unit_close="20:31"))
+    blob = blob.replace("일자,".encode(), "26.10.18,".encode(), 1)
+    trips, stat = nb.parse(blob)
+    assert stat["parsed"] == 2 and stat["date_from"] == date(2026, 9, 29)
+    blank = sheet(row()).replace("일자,".encode(), b",", 1)        # A1 이 빈 칸이어도
+    assert nb.parse(blank)[1]["parsed"] == 1
+
+
 def test_bad_sheet_raises():
     with pytest.raises(nb.SheetError):
         nb.parse(b"a,b,c\n1,2,3\n")               # 열 이름이 다름

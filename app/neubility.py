@@ -37,6 +37,22 @@ def _find(hdr: list[str], *musts: str) -> int:
     raise SheetError(f"열을 찾을 수 없습니다: {' + '.join(musts)}")
 
 
+def _day_col(hdr: list[str], body: list[list[str]]) -> int:
+    """'일자' 열. 시트 A1 이 '일자' 대신 날짜(예: `26.10.18`, 마지막 작성일)로 적혀 오는 경우가 있어,
+    이름으로 못 찾으면 값의 과반이 날짜인 열(헤더 칸이 비었거나 날짜인 것만)을 쓴다."""
+    try:
+        return _find(hdr, "일자")
+    except SheetError:
+        pass
+    for i, h in enumerate(hdr):
+        if (h or "").strip() and _day(h) is None:
+            continue                            # 이름이 있는 다른 열(상태·가게명 등)은 후보가 아니다
+        vals = [r[i].strip() for r in body if i < len(r) and r[i].strip()]
+        if vals and sum(_day(v) is not None for v in vals) * 2 > len(vals):
+            return i
+    raise SheetError("열을 찾을 수 없습니다: 일자 (A1 칸에 '일자'라고 적혀 있는지 확인해주세요)")
+
+
 def _close_col(hdr: list[str], where: str) -> int:
     """'적재함 닫힌/딛힌' 열. 시트 오타 때문에 '닫'·'딛' 둘 다 받는다."""
     for frag in ("닫힌", "딛힌", "닫힘"):
@@ -131,7 +147,7 @@ def parse(blob: bytes) -> tuple[list[RobotTrip], dict]:
         raise SheetError("빈 파일입니다")
     hdr = rows[0]
     col = {
-        "day": _find(hdr, "일자"), "status": _find(hdr, "상태"),
+        "day": _day_col(hdr, rows[1:]), "status": _find(hdr, "상태"),
         "robot": _find(hdr, "로봇", "ID"), "dest": _find(hdr, "목적지"),
         "dock_close": _close_col(hdr, "도킹존"), "unit_close": _close_col(hdr, "세대"),
         "ret_start": _find(hdr, "복귀시작"), "ret_done": _find(hdr, "복귀완료"),
