@@ -127,6 +127,19 @@ def test_day_header_written_as_date():
     assert nb.parse(blank)[1]["parsed"] == 1
 
 
+def test_split_dong_and_unit_columns():
+    """10/22 양식: 목적지 → 동·호수 두 열. 동만 읽고 호수는 어디에도 남기지 않는다.
+    '(동앞) 도착 시각' 열을 동 열로 잘못 잡지 않아야 한다."""
+    hdr = HDR.replace("목적지", "동,호수")
+    line = row(dest="999동,9999호")
+    blob = "\n".join([hdr, line, row(dest="998,9998호", dock_close="20:15", unit_close="20:31")]).encode()
+    trips, stat = nb.parse(blob)
+    assert stat["parsed"] == 2
+    assert sorted(t.dong for t in trips) == ["998", "999"]
+    for t in trips:
+        assert not any("9999" in str(v) or "9998" in str(v) for v in vars(t).values())
+
+
 def test_bad_sheet_raises():
     with pytest.raises(nb.SheetError):
         nb.parse(b"a,b,c\n1,2,3\n")               # 열 이름이 다름

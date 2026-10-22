@@ -7,7 +7,7 @@
 - 시각이 HH:MM 분 단위다(초 없음). 그래서 우리 Redash 값과 수십 초씩 어긋난다 — 대조용이지 KPI 원본이 아니다.
 - 날짜가 `YY.MM.DD` 이고 시각에는 날짜가 없다. 심야 배송은 자정을 넘기므로 앞 시각보다 이르면 하루 더한다.
 - 헤더에 오타가 있다("적재함 딛힌 시각"). 열은 이름 완전일치가 아니라 조각 포함으로 찾는다.
-- 호수(세대)는 읽지 않는다. 목적지에서 동만 떼어 쓴다(주문 ↔ 시트 짝짓기는 kpi.match_trips).
+- 호수(세대)는 읽지 않는다. `동` 열(10/22 이후 양식) 또는 옛 `목적지` 열에서 동만 떼어 쓴다(주문 ↔ 시트 짝짓기는 kpi.match_trips).
 """
 import csv
 import hashlib
@@ -120,9 +120,26 @@ def _secs(a: datetime | None, b: datetime | None) -> float | None:
 
 
 def _dong(v: str) -> str | None:
-    """목적지에서 동만. 호수는 개별 세대라 떼어내고 버린다."""
-    m = re.search(r"(\d+)\s*동", v or "")
+    """`119동 603호`(옛 목적지 열) 또는 `119동`·`119`(동 열)에서 동 번호만. 호수는 버린다."""
+    v = (v or "").strip()
+    m = re.search(r"(\d+)\s*동", v)
+    if m:
+        return m.group(1)
+    m = re.fullmatch(r"(\d+)(?:\.0)?", v)       # 동 열에 숫자만 적힌 경우(엑셀이 119.0 으로 줄 때 포함)
     return m.group(1) if m else None
+
+
+def _dong_col(hdr: list[str]) -> int:
+    """동을 읽을 열. 10/22 부터 시트가 `목적지` 한 열 → `동`·`호수` 두 열로 바뀌었다.
+    `동` 은 이름이 정확히 '동' 인 열만 — 조각 포함으로 찾으면 '(동앞) 도착 시각' 이 걸린다.
+    `호수` 열은 개별 세대라 어느 경우에도 읽지 않는다."""
+    for i, h in enumerate(hdr):
+        if re.sub(r"\s+", "", h or "") == "동":
+            return i
+    try:
+        return _find(hdr, "목적지")
+    except SheetError:
+        raise SheetError("열을 찾을 수 없습니다: 동 (또는 목적지)") from None
 
 
 def _rows(blob: bytes) -> list[list[str]]:
@@ -148,7 +165,7 @@ def parse(blob: bytes) -> tuple[list[RobotTrip], dict]:
     hdr = rows[0]
     col = {
         "day": _day_col(hdr, rows[1:]), "status": _find(hdr, "상태"),
-        "robot": _find(hdr, "로봇", "ID"), "dest": _find(hdr, "목적지"),
+        "robot": _find(hdr, "로봇", "ID"), "dest": _dong_col(hdr),
         "dock_close": _close_col(hdr, "도킹존"), "unit_close": _close_col(hdr, "세대"),
         "ret_start": _find(hdr, "복귀시작"), "ret_done": _find(hdr, "복귀완료"),
     }
