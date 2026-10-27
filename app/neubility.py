@@ -1,7 +1,7 @@
 """뉴빌리티 수기 기록(구글 시트 내보내기) → robot_trips.
 
 로봇 복귀·가용률과 로봇 건 리스트의 동 표시에 쓴다(Redash 에 없는 두 가지).
-수집 배치(Redash)와 무관하게 관리자 업로드로만 들어온다.
+수집 배치(Redash)와 무관하게 들어온다 — 관리자가 파일을 올리거나, 공개 시트 URL 에서 직접 긁어온다(fetch).
 
 시트 특성상 흡수해야 하는 것:
 - 시각이 HH:MM 분 단위다(초 없음). 그래서 우리 Redash 값과 수십 초씩 어긋난다 — 대조용이지 KPI 원본이 아니다.
@@ -13,8 +13,11 @@ import csv
 import hashlib
 import io
 import logging
+import os
 import re
 from datetime import date, datetime, time, timedelta
+
+import requests
 
 from .db import RobotTrip
 
@@ -155,6 +158,55 @@ def _rows(blob: bytes) -> list[list[str]]:
         except UnicodeDecodeError:
             continue
     raise SheetError("CSV 인코딩을 알 수 없습니다 (UTF-8 또는 CP949 로 저장해주세요)")
+
+
+SHEET_URL_ENV = "NEUBILITY_SHEET_URL"
+FETCH_TIMEOUT = 30
+
+
+def sheet_url() -> str | None:
+    return os.getenv(SHEET_URL_ENV, "").strip() or None
+
+
+def export_url(url: str) -> str:
+    """구글 시트 주소 → CSV 내보내기 주소. 이미 export 주소면 그대로 쓴다.
+
+    `/edit?gid=0#gid=0` 처럼 gid 가 조각(#) 쪽에 있는 경우가 많아 양쪽에서 찾는다.
+    gid 를 못 찾으면 첫 번째 탭(0)을 쓴다 — 뉴빌리티 시트는 탭이 하나다.
+    """
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    if not m:
+        raise SheetError("구글 스프레드시트 주소가 아닙니다 (/spreadsheets/d/... 형태여야 합니다)")
+    if "/export" in url:
+        return url
+    g = re.search(r"[?&#]gid=(\d+)", url)
+    return (f"https://docs.google.com/spreadsheets/d/{m.group(1)}"
+            f"/export?format=csv&gid={g.group(1) if g else '0'}")
+
+
+def fetch(url: str | None = None) -> bytes:
+    """공개 시트를 CSV 로 내려받는다. 구글 API 키는 필요 없고 '링크가 있는 모든 사용자' 공개면 된다.
+
+    공유가 막히면 구글이 로그인 HTML 을 200 으로 돌려주므로, 본문이 HTML 이면 실패로 본다
+    (그대로 파서에 넘기면 '열을 찾을 수 없습니다' 라는 엉뚱한 오류가 난다).
+    """
+    url = url or sheet_url()
+    if not url:
+        raise SheetError(f"{SHEET_URL_ENV} 환경변수가 없습니다 — 시트 주소를 넣어주세요")
+    src = export_url(url)
+    try:
+        r = requests.get(src, timeout=FETCH_TIMEOUT)
+    except requests.RequestException as e:
+        raise SheetError(f"시트를 가져오지 못했습니다: {type(e).__name__}") from e
+    if r.status_code != 200:
+        raise SheetError(f"시트를 가져오지 못했습니다 (HTTP {r.status_code}) — 공유 설정을 확인해주세요")
+    blob = r.content
+    if b"<html" in blob[:1000].lower():
+        raise SheetError("시트가 비공개입니다 — 공유를 '링크가 있는 모든 사용자(뷰어)' 로 바꿔주세요")
+    if not blob:
+        raise SheetError("빈 시트입니다")
+    log.info("시트 fetch %s bytes=%d", src, len(blob))
+    return blob
 
 
 def parse(blob: bytes) -> tuple[list[RobotTrip], dict]:

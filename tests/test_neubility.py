@@ -236,3 +236,69 @@ def test_dong_coverage_after_upload(session):
     nb.upsert(session, nb.parse(sheet(row(robot="231", dest="999동 9999호")))[0], "a@barogo.com")
     assert kpi.dong_coverage(session, date(2026, 9, 29), date(2026, 9, 29)) == {
         "orders": 2, "matched": 1}
+
+
+# ---------------------------------------------------------------- 공개 시트 가져오기
+def test_export_url_from_edit_link():
+    """gid 가 조각(#) 쪽에 있는 공유 주소도 CSV 내보내기 주소로 바꾼다."""
+    assert nb.export_url("https://docs.google.com/spreadsheets/d/ABC_123-x/edit?gid=7#gid=7") == (
+        "https://docs.google.com/spreadsheets/d/ABC_123-x/export?format=csv&gid=7")
+
+
+def test_export_url_defaults_to_first_tab():
+    assert nb.export_url("https://docs.google.com/spreadsheets/d/ABC/edit").endswith("gid=0")
+
+
+def test_export_url_passthrough_and_reject():
+    src = "https://docs.google.com/spreadsheets/d/ABC/export?format=csv&gid=0"
+    assert nb.export_url(src) == src
+    with pytest.raises(nb.SheetError):
+        nb.export_url("https://example.com/not-a-sheet")
+
+
+class _Resp:
+    def __init__(self, content, status=200):
+        self.content, self.status_code = content, status
+
+
+def test_fetch_reads_public_sheet(monkeypatch):
+    blob = sheet(row(robot="231", dest="901동 101호"))
+    monkeypatch.setattr(nb.requests, "get", lambda url, timeout: _Resp(blob))
+    monkeypatch.setenv(nb.SHEET_URL_ENV, "https://docs.google.com/spreadsheets/d/ABC/edit#gid=0")
+    assert nb.parse(nb.fetch())[1]["parsed"] == 1
+
+
+def test_fetch_rejects_login_page(monkeypatch):
+    """비공개 시트는 구글이 로그인 HTML 을 200 으로 준다 — 파서에 넘기면 엉뚱한 오류가 난다."""
+    monkeypatch.setattr(nb.requests, "get",
+                        lambda url, timeout: _Resp(b"<!DOCTYPE html><html><head>Sign in"))
+    monkeypatch.setenv(nb.SHEET_URL_ENV, "https://docs.google.com/spreadsheets/d/ABC/edit")
+    with pytest.raises(nb.SheetError, match="비공개"):
+        nb.fetch()
+
+
+def test_fetch_without_env(monkeypatch):
+    monkeypatch.delenv(nb.SHEET_URL_ENV, raising=False)
+    with pytest.raises(nb.SheetError, match=nb.SHEET_URL_ENV):
+        nb.fetch()
+
+
+def test_fetch_http_error(monkeypatch):
+    monkeypatch.setattr(nb.requests, "get", lambda url, timeout: _Resp(b"", 404))
+    monkeypatch.setenv(nb.SHEET_URL_ENV, "https://docs.google.com/spreadsheets/d/ABC/edit")
+    with pytest.raises(nb.SheetError, match="404"):
+        nb.fetch()
+
+
+def test_fetch_route_access(client, monkeypatch):
+    """시트 가져오기도 관리자만. CSRF 헤더가 없으면 400, 주소 미설정이면 400."""
+    h = jwt("jmlee@barogo.com")
+    xhr = {**h, "X-Requested-With": "fetch"}
+    monkeypatch.setenv(nb.SHEET_URL_ENV, "https://docs.google.com/spreadsheets/d/ABC/edit")
+    assert client.post("/admin/trips/fetch", headers={"X-Requested-With": "fetch"}).status_code == 401
+    assert client.post("/admin/trips/fetch",
+                       headers={**jwt("other@barogo.com"), "X-Requested-With": "fetch"}).status_code == 403
+    assert client.post("/admin/trips/fetch", headers=h).status_code == 400     # CSRF 헤더 없음
+    assert client.post("/admin/trips/fetch", headers=xhr).status_code == 202
+    monkeypatch.delenv(nb.SHEET_URL_ENV, raising=False)
+    assert client.post("/admin/trips/fetch", headers=xhr).status_code == 400   # 주소 미설정
