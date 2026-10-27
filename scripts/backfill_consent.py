@@ -1,15 +1,16 @@
-"""이미 쌓인 주문 전체에 Redash 의 `상점로봇동의상태` 를 채운다.
+"""이미 쌓인 주문 전체에 Redash 의 보강 컬럼(collector.FILL_COLS)을 채운다.
 
-동의 컬럼이 쿼리에 추가되기 전에 수집된 행은 이 값이 NULL 이라 대시보드에서 "-" 로 나온다.
-전체 재수집(`collect.py --full`)도 값을 채우지만 모든 컬럼을 덮어쓰므로, 쿼리 버전이 바뀐
-뒤에는 이미 산출된 시간·상태 값까지 따라 바뀐다. 이 스크립트는 동의상태와 상점ID 만 건드린다.
+지금 채우는 건 `상점로봇동의상태`·`상점ID`·`결제방식` 세 개다. 쿼리에 나중에 추가된 컬럼이라
+그 전에 수집된 행은 NULL 이고 대시보드에서 "-" 로 나온다. 전체 재수집(`collect.py --full`)도
+값을 채우지만 모든 컬럼을 덮어쓰므로, 쿼리 버전이 바뀐 뒤에는 이미 산출된 시간·상태 값까지
+따라 바뀐다. 이 스크립트는 FILL_COLS 만 건드린다.
 
   DATABASE_URL=... python scripts/backfill_consent.py              # DB 에 있는 주문 전 기간
   DATABASE_URL=... python scripts/backfill_consent.py --dry-run    # 바꾸지 않고 건수만
   DATABASE_URL=... python scripts/backfill_consent.py --since 2026-08-01 --until 2026-10-18
 
 REDASH_URL / REDASH_API_KEY / REDASH_QUERY_ID 가 필요하다(.env 또는 환경변수).
-REDASH_QUERY_ID 는 동의 컬럼이 **저장된** 쿼리를 가리켜야 한다 — 편집창에서만 고친 내용은
+REDASH_QUERY_ID 는 그 컬럼들이 **저장된** 쿼리를 가리켜야 한다 — 편집창에서만 고친 내용은
 API 로 실행되지 않는다. 월 단위로 조회하므로 기간이 길면 Redash 스캔량이 그만큼 늘어난다.
 """
 import argparse
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
-from app.collector import (CONSENT_COL, CollectError, backfill_consent,  # noqa: E402
+from app.collector import (CollectError, backfill_added_columns,  # noqa: E402
                            consent_fill_by_month, orders_date_range)
 from app.db import get_session_factory  # noqa: E402
 
@@ -71,22 +72,22 @@ def main() -> int:
     _report("백필 전")
     print(f"\nRedash 조회 {start} ~ {end} (월 단위){' · dry-run' if a.dry_run else ''}")
     try:
-        st = backfill_consent(start, end, dry_run=a.dry_run)
+        st = backfill_added_columns(start, end, dry_run=a.dry_run)
     except CollectError as e:
         print(f"백필 실패: {e}", file=sys.stderr)
         return 1
 
     print(f"\n조회 {st['months']}개월 · Redash {st['fetched']:,}건 · DB 일치 {st['matched']:,}건 "
           f"· {'바뀔 행' if a.dry_run else '갱신'} {st['updated']:,}건 · DB 에 없는 주문 {st['not_in_db']:,}건")
-    if st["no_consent_col"]:
-        print(f"[문제] 응답에 {CONSENT_COL} 컬럼이 없는 달: {', '.join(st['no_consent_col'])}")
+    for col, months in st["no_col"].items():
+        print(f"[문제] 응답에 {col} 컬럼이 없는 달: {', '.join(months)}")
         print("   → Redash 에서 쿼리를 '저장'했는지, REDASH_QUERY_ID 가 그 쿼리인지 확인하세요.")
     for f in st["failed"]:
         print(f"[실패] {f}")
 
     if not a.dry_run:
         _report("백필 후")
-    return 1 if (st["failed"] or st["no_consent_col"]) else 0
+    return 1 if (st["failed"] or st["no_col"]) else 0
 
 
 if __name__ == "__main__":

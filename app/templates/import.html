@@ -8,7 +8,7 @@
   <div class="k"><b>Redash 수집 상태</b><span id="c-state" class="badge"></span>
     <button type="button" id="c-go" class="imp-btn">지금 수집</button>
     <button type="button" id="c-full" class="imp-btn" title="2025-01-01부터 월 단위로 전체 재수집합니다. 수집 전용 테이블만 갱신되고 수기 입력은 유지됩니다.">전체 재수집(백필)</button>
-    <button type="button" id="c-consent" class="imp-btn" title="이미 쌓인 주문 전 기간에 상점로봇동의상태만 다시 받아 채웁니다. 시간·상태 등 나머지 값은 그대로 둡니다.">동의상태만 채우기</button></div>
+    <button type="button" id="c-consent" class="imp-btn" title="이미 쌓인 주문 전 기간에 동의상태·상점ID·결제방식만 다시 받아 채웁니다. 시간·상태 등 나머지 값은 그대로 둡니다.">보강 컬럼 채우기</button></div>
   <div class="sub" id="c-info"></div>
   <div class="sub" id="c-consent-info"></div>
   <div class="sub" id="c-cols"></div>
@@ -126,7 +126,7 @@
     $('c-info').textContent = 'DB raw_orders ' + fmt(j.raw_orders) + '건 · 주기 ' + (j.interval_min || '-') + '분 · 마지막 시작 ' + (j.last_start || '-') +
       (miss.length ? ' · 미설정 환경변수: ' + miss.join(', ') : '');
     var e = $('c-err'); e.hidden = !j.last_error; e.textContent = j.last_error || '';
-    $('c-consent-info').textContent = j.last_consent ? '동의상태 백필: ' + j.last_consent : '';
+    $('c-consent-info').textContent = j.last_consent ? '보강 컬럼 백필: ' + j.last_consent : '';
     var t = $('t-info'), tb = $('t-go');
     tb.disabled = !j.sheet_configured;
     t.className = 'sub' + (j.last_trips && j.last_trips.indexOf('실패') >= 0 ? ' bad' : '');
@@ -165,7 +165,7 @@
     }).then(cPoll);
   });
   $('c-consent').addEventListener('click', function () {
-    if (!confirm('이미 쌓인 주문 전 기간에 상점로봇동의상태만 다시 받아 채웁니다. 나머지 값은 그대로 둡니다. 진행할까요?')) return;
+    if (!confirm('이미 쌓인 주문 전 기간에 동의상태·상점ID·결제방식만 다시 받아 채웁니다. 나머지 값은 그대로 둡니다. 진행할까요?')) return;
     fetch('/admin/collect/consent', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
       if (!r.ok) return r.json().then(function (d) { setMsg('백필 시작 실패: ' + (d.detail || r.status)); });
     }).then(cPoll);

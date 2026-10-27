@@ -65,6 +65,40 @@ def test_metrics_without_notes(session):
     assert m["success_pct"] == 100.0
 
 
+def test_usage_excludes_onsite_payment_from_denominator(session):
+    """이용률 분모 = 로봇과 매칭될 수 있었던 주문. 현장결제는 로봇이 수납을 못 해 뺀다 —
+    분모에 두면 로봇이 가져갈 수 없는 물량까지 모수로 잡혀 이용률이 실제보다 낮게 나온다.
+    건수·시간 지표의 모수는 그대로 둔다(현장결제도 '일어난 배송' 이다)."""
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    assert kpi.compute_metrics(rows, {})["usage_pct"] == 50.0   # 결제방식 NULL = 판정 불가, 전부 분모
+
+    for o in rows:
+        o.payment_method = "현장카드결제" if o.delivery_id in ("1", "2") else "선결제"
+    session.commit()
+
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    m = kpi.compute_metrics(rows, {})
+    assert (m["usage_base_n"], m["onsite_n"]) == (4, 2)         # 일반 2건이 분모에서 빠진다
+    assert m["usage_pct"] == 75.0                               # 로봇 3 ÷ 4 (전에는 3 ÷ 6 = 50%)
+    assert m["usage_loadshop_pct"] == 100.0                     # 로드샵은 로봇 3건만 남는다
+    assert m["completed"] == 6 and m["robot_done"] == 3         # 건수 지표는 그대로
+    assert m["avg_total_min"] == kpi._min(kpi._mean([o.s_order_finish for o in rows]))
+
+
+def test_usage_keeps_robot_orders_even_if_onsite(session):
+    """로봇연계 건은 결제방식과 무관하게 분모에 남긴다 — 빼면 분자가 분모보다 커진다."""
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    for o in rows:
+        o.payment_method = "현장현금결제"          # 전부 현장결제인 극단 케이스
+    session.commit()
+
+    rows = kpi.scoped_done(session, date(2026, 9, 30), date(2026, 9, 30))
+    m = kpi.compute_metrics(rows, {})
+    assert (m["usage_base_n"], m["onsite_n"]) == (3, 3)         # 로봇 3건만 분모에 남는다
+    assert m["usage_pct"] == 100.0                              # 100% 를 넘지 않는다
+    assert kpi.robot_eligible(rows) == [o for o in rows if o.delivery_type == kpi.ROBOT]
+
+
 def test_exclusion_removes_from_all_metrics(session):
     session.add(dbm.RobotOrderNote(delivery_id="5", exclude_from_kpi=True, note="테스트 주문"))
     session.commit()
@@ -346,7 +380,11 @@ def test_dashboard_renders_b2b_column(session):
     assert r.status_code == 200
     # 표: 합이 왼쪽에서 오른쪽으로 읽히도록 제외가 B2B_로봇 바로 뒤에 온다
     head = r.text[r.text.index("일자별 주요 항목"):]
-    assert "<th>전체 완료</th><th>로드샵_라이더</th><th>B2B_라이더</th><th>로드샵_로봇</th><th>B2B_로봇</th><th>제외</th><th>전체_로봇 이용률</th><th>로드샵_로봇 이용률</th>" in head
+    import re
+    # 제목 텍스트만 뽑아 비교한다 — th 에 title 툴팁이 붙어도 순서 검사가 깨지지 않게.
+    ths = re.findall(r"<th[^>]*>(.*?)</th>", head[:head.index("</thead>")], re.S)
+    assert ths[1:9] == ["전체 완료", "로드샵_라이더", "B2B_라이더", "로드샵_로봇", "B2B_로봇",
+                        "제외", "전체_로봇 이용률", "로드샵_로봇 이용률"]
     # 카드: 전체 완료 건수도 제외를 포함해 표와 숫자가 통일된다
     # 제외한 "1" 은 로드샵 건이라 로드샵에서 빠져 제외로 옮겨간다 (6 = 1+1+3+1)
     card = r.text[r.text.index("전체 완료 건수"):r.text.index("로봇 완료 건수")]
@@ -499,9 +537,9 @@ def test_consent_by_store_and_dashboard_wiring(session):
 
 def test_robot_miss_conditions(session):
     """로봇 누락 후보: 로봇으로 갈 수 있었는데 안 간 건만. 조건을 하나씩 떼어 확인한다 —
-    B2B·미동의·운영시간 밖까지 세면 '누락' 이 아니라 '원래 못 가는 건' 을 세게 된다."""
+    B2B·미동의·운영시간 밖·현장결제까지 세면 '누락' 이 아니라 '원래 못 가는 건' 을 세게 된다."""
     base = dict(is_robot=False, delivery_status="DROP_FINISHED", store_type="일반(로드샵)",
-                consent="동의", ord_dt=datetime(2026, 9, 30, 15, 0))
+                consent="동의", payment="선결제", ord_dt=datetime(2026, 9, 30, 15, 0))
     assert kpi.is_robot_miss(base)
     assert not kpi.is_robot_miss({**base, "is_robot": True})                  # 이미 로봇이 감
     assert not kpi.is_robot_miss({**base, "delivery_status": "CANCELED"})     # 취소
@@ -512,6 +550,12 @@ def test_robot_miss_conditions(session):
     assert kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 13, 0)})    # 시작 정각 포함
     assert kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 20, 59)})
     assert not kpi.is_robot_miss({**base, "ord_dt": datetime(2026, 9, 30, 21, 0)})  # 종료 정각 제외
+    # 현장결제는 로봇이 수납을 못 해 애초에 못 가는 건이다
+    assert not kpi.is_robot_miss({**base, "payment": "현장카드결제"})
+    assert not kpi.is_robot_miss({**base, "payment": "현장현금결제"})
+    # 값이 없으면(컬럼 추가 전 수집분) 후보로 남긴다 — 모르는 건을 빼면 과거 기간이 통째로 줄어
+    # 개선 여지가 없어 보인다. 백필로 채워지면 저절로 판정된다.
+    assert kpi.is_robot_miss({**base, "payment": ""})
 
 
 def test_miss_uses_roster_consent_for_old_orders(session):
