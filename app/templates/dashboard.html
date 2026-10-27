@@ -18,7 +18,8 @@
   <div class="card">
     <div class="k">로봇 완료 건수</div>
     <div class="v">{{ m.robot_done }}<small>건</small></div>
-    <div class="sub">로봇 이용률 {{ m.usage_pct | num(1, '%') }} (로봇연계 ÷ 집계 대상 {{ m.completed }}건)</div>
+    <div class="sub" title="현장결제(카드·현금)는 로봇이 수납을 못 해 애초에 로봇과 매칭될 수 없는 주문이라 분모에서 뺍니다. 결제방식이 없는 과거 수집분은 판정할 수 없어 분모에 그대로 둡니다.">로봇 이용률 {{ m.usage_pct | num(1, '%') }}
+      (로봇연계 ÷ 로봇 매칭 가능 {{ m.usage_base_n }}건){% if m.onsite_n %} · 현장결제 {{ m.onsite_n }}건 제외{% endif %}</div>
     {% if p.grain != 'day' and m.avg_robot is not none %}<div class="sub">일평균 <b>{{ m.avg_robot | num(1) }}건</b> (경과 {{ m.avg_days }}일 기준)</div>{% endif %}
   </div>
   <div class="card">
@@ -40,7 +41,7 @@
 <div class="tablewrap">
 <table class="list">
   <thead><tr>
-    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>전체 완료</th><th>로드샵_라이더</th><th>B2B_라이더</th><th>로드샵_로봇</th><th>B2B_로봇</th><th>제외</th><th>전체_로봇 이용률</th><th>로드샵_로봇 이용률</th>
+    <th>{{ '일자' if kind == 'day' else '주간' }}</th><th>전체 완료</th><th>로드샵_라이더</th><th>B2B_라이더</th><th>로드샵_로봇</th><th>B2B_로봇</th><th>제외</th><th title="현장결제(카드·현금)는 로봇이 수납을 못 해 애초에 로봇과 매칭될 수 없는 주문이라 분모에서 뺍니다. 결제방식이 없는 과거 수집분은 판정할 수 없어 분모에 그대로 둡니다.">전체_로봇 이용률</th><th title="현장결제(카드·현금)는 로봇이 수납을 못 해 애초에 로봇과 매칭될 수 없는 주문이라 분모에서 뺍니다. 결제방식이 없는 과거 수집분은 판정할 수 없어 분모에 그대로 둡니다.">로드샵_로봇 이용률</th>
     <th>접수→완료(분)<br>전체</th><th>접수→완료(분)<br>로봇</th><th>픽업→완료(분)<br>전체</th><th>픽업→완료(분)<br>로봇</th><th>적시 배송률</th><th>배송 성공률</th>
   </tr></thead>
   <tbody>
@@ -277,7 +278,7 @@
   </div>
   <div class="chart-card">
     <h3>로봇 이용률 (%)</h3>
-    <p class="d">{{ trend_range[0] }} ~ {{ trend_range[1] }} · {{ '일별' if p.grain == 'week' else '주별' }} · 전체_로봇 = 로봇 ÷ 전체 완료, 로드샵_로봇 = 로봇 ÷ (로드샵_라이더+로드샵_로봇)</p>
+    <p class="d" title="현장결제(카드·현금)는 로봇이 수납을 못 해 애초에 로봇과 매칭될 수 없는 주문이라 분모에서 뺍니다. 결제방식이 없는 과거 수집분은 판정할 수 없어 분모에 그대로 둡니다.">{{ trend_range[0] }} ~ {{ trend_range[1] }} · {{ '일별' if p.grain == 'week' else '주별' }} · 전체_로봇 = 로봇 ÷ 로봇 매칭 가능 건, 로드샵_로봇 = 로봇 ÷ 로드샵 중 로봇 매칭 가능 건 (현장결제 제외)</p>
     <canvas id="usageChart"></canvas>
   </div>
 </div>

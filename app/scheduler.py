@@ -13,7 +13,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 
 from . import neubility
-from .collector import CollectError, backfill_consent, orders_date_range, run_collect
+from .collector import CollectError, backfill_added_columns, orders_date_range, run_collect
 from .collector import log as write_collect_log
 from .db import CollectLog, get_session_factory
 
@@ -59,7 +59,9 @@ def collect_once(force_full: bool = False) -> bool:
 
 
 def consent_backfill_once() -> bool:
-    """이미 쌓인 주문 전 기간에 상점로봇동의상태만 채운다. 수집과 같은 락을 쓴다(동시 실행 금지).
+    """이미 쌓인 주문 전 기간에 collector.FILL_COLS(동의상태·상점ID·결제방식)만 채운다.
+
+    수집과 같은 락을 쓴다(동시 실행 금지).
 
     결과는 STATE["last_consent"] 로 /admin/import 화면에 보여주는데, 그건 프로세스 메모리라
     재배포하면 사라진다. 그래서 collect_log 에도 status='info' 로 한 줄 남긴다 — 'success' 로
@@ -74,26 +76,26 @@ def consent_backfill_once() -> bool:
             lo, hi = orders_date_range(s)
         if lo is None:
             STATE["last_consent"] = "raw_orders 가 비어 있어 건너뜀 — 먼저 수집을 돌려주세요"
-            write_collect_log("info", 0, "동의상태 백필: raw_orders 가 비어 있어 건너뜀")
+            write_collect_log("info", 0, "보강 컬럼 백필: raw_orders 가 비어 있어 건너뜀")
             return True
-        log.info("동의상태 백필 시작 %s~%s", lo, hi)
-        st = backfill_consent(lo, hi)
+        log.info("보강 컬럼 백필 시작 %s~%s", lo, hi)
+        st = backfill_added_columns(lo, hi)
         msg = (f"{lo}~{hi} · Redash {st['fetched']:,}건 · 갱신 {st['updated']:,}건"
                f" · DB 에 없는 주문 {st['not_in_db']:,}건")
-        if st["no_consent_col"]:
-            msg += f" · ⚠ 동의 컬럼 없는 달 {', '.join(st['no_consent_col'])} (쿼리 저장·QUERY_ID 확인)"
+        for col, months in st["no_col"].items():
+            msg += f" · ⚠ {col} 없는 달 {', '.join(months)} (쿼리 저장·QUERY_ID 확인)"
         if st["failed"]:
             msg += f" · 실패 {len(st['failed'])}개월"
         STATE["last_consent"] = msg
-        write_collect_log("info", st["updated"], f"동의상태 백필: {msg}")
-        log.info("동의상태 백필 완료 %s", msg)
+        write_collect_log("info", st["updated"], f"보강 컬럼 백필: {msg}")
+        log.info("보강 컬럼 백필 완료 %s", msg)
     except CollectError as e:
         STATE["last_error"] = str(e)[:300]
-        write_collect_log("info", 0, f"동의상태 백필 실패: {str(e)[:200]}")
-        log.error("동의상태 백필 실패: %s", e)
+        write_collect_log("info", 0, f"보강 컬럼 백필 실패: {str(e)[:200]}")
+        log.error("보강 컬럼 백필 실패: %s", e)
     except Exception as e:              # noqa: BLE001 — 스레드는 죽지 않게 한다
         STATE["last_error"] = f"{type(e).__name__}: {str(e)[:250]}"
-        log.exception("동의상태 백필 오류")
+        log.exception("보강 컬럼 백필 오류")
     finally:
         STATE["running"] = False
         _run_lock.release()

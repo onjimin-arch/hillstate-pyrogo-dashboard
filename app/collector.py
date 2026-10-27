@@ -77,34 +77,51 @@ def df_to_orders(df: pd.DataFrame) -> list[RawOrder]:
     return out
 
 
-CONSENT_COL, STORE_COL = "상점로봇동의상태", "상점ID"
+CONSENT_COL, STORE_COL, PAYMENT_COL = "상점로봇동의상태", "상점ID", "결제방식"
+
+# 백필이 채우는 컬럼 = '쿼리에 나중에 추가돼 과거 수집분이 NULL 로 남은' 것들.
+# 시간·상태 컬럼은 여기 넣지 않는다 — 쿼리 ver 이 바뀌어도 이미 산출된 KPI 가 휩쓸리지 않게.
+# 상점ID 를 같이 채우는 이유: 동의율은 상점 단위 집계라 상점ID 가 없으면 동의값이 있어도
+# '상점 수' 모수에서 빠진다(kpi.consent_stats).
+# 셋을 한 번에 채우는 이유: 같은 쿼리를 같은 기간으로 다시 받는 작업이라, 컬럼별로 나누면
+# Redash 스캔량만 배로 든다.
+FILL_COLS = {CONSENT_COL: "store_robot_consent", STORE_COL: "store_id",
+             PAYMENT_COL: "payment_method"}
 
 
-def consent_map(df: pd.DataFrame) -> dict[str, tuple[str | None, str | None]]:
-    """배달ID → (상점로봇동의상태, 상점ID). 쿼리에 동의 컬럼이 없으면 빈 dict."""
-    if CONSENT_COL not in df.columns:
+def fill_map(df: pd.DataFrame) -> dict[str, dict[str, str]]:
+    """배달ID → {모델 속성: 값}. 쿼리에 실제로 있는 FILL_COLS 만, 빈 값은 빼고 담는다.
+
+    빈 값을 빼는 건 덮어쓰기를 막기 위해서다 — 이미 채워진 값을 NULL 로 되돌리면 안 된다.
+    """
+    have = [c for c in FILL_COLS if c in df.columns]
+    if not have:
         return {}
     out = {}
     for rec in df.to_dict("records"):
         did = _id_str(rec.get("배달ID"))
         if did:
-            out[did] = (_id_str(rec.get(CONSENT_COL)), _id_str(rec.get(STORE_COL)))
+            vals = ((FILL_COLS[c], _id_str(rec.get(c))) for c in have)
+            out[did] = {a: v for a, v in vals if v}
     return out
 
 
-def backfill_consent(start: date, end: date, dry_run: bool = False, fetch=None) -> dict:
-    """이미 쌓인 raw_orders 행에 상점로봇동의상태·상점ID 만 채운다(월 단위 조회).
+def backfill_added_columns(start: date, end: date, dry_run: bool = False, fetch=None) -> dict:
+    """이미 쌓인 raw_orders 행에 FILL_COLS 만 채운다(월 단위 조회).
 
     전체 재수집과 달리 나머지 컬럼은 건드리지 않는다 — 쿼리가 ver 바뀌며 컬럼이
     없어지거나 의미가 달라져도 이미 산출된 시간·상태 값이 휩쓸리지 않게 하려는 것이다.
     DB 에 없는 배달ID 는 새로 만들지 않는다(주문 적재는 수집 배치 책임).
     collect_log 에는 남기지 않는다 — success 행을 남기면 kpi.freshness 의
     '마지막 수집 시각' 이 실제 수집과 무관하게 갱신돼 데이터가 최신인 것처럼 보인다.
+
+    쿼리에 없는 컬럼은 st["no_col"] 에 달별로 남기고 **그 컬럼만** 건너뛴다 — 하나가
+    없다고 달 전체를 거르면 같이 받을 수 있던 나머지 컬럼까지 NULL 로 남는다.
     """
     fetch = fetch or fetch_redash
     SL = get_session_factory()
     st = {"months": 0, "fetched": 0, "matched": 0, "updated": 0, "not_in_db": 0,
-          "no_consent_col": [], "failed": []}
+          "no_col": {}, "failed": []}
     for a, b in month_chunks(start, end):
         st["months"] += 1
         try:
@@ -115,10 +132,12 @@ def backfill_consent(start: date, end: date, dry_run: bool = False, fetch=None) 
         if frame is None or not len(frame):
             continue
         st["fetched"] += len(frame)
-        if CONSENT_COL not in frame.columns:
-            st["no_consent_col"].append(f"{a:%Y-%m}")
+        for c in FILL_COLS:
+            if c not in frame.columns:
+                st["no_col"].setdefault(c, []).append(f"{a:%Y-%m}")
+        pairs = fill_map(frame)
+        if not pairs:                         # 채울 컬럼이 하나도 없는 달
             continue
-        pairs = consent_map(frame)
         ids = list(pairs)
         with SL() as s:
             for i in range(0, len(ids), 500):
@@ -128,16 +147,11 @@ def backfill_consent(start: date, end: date, dry_run: bool = False, fetch=None) 
                 st["matched"] += len(rows)
                 st["not_in_db"] += len(batch) - len(rows)
                 for o in rows:
-                    consent, store_id = pairs[o.delivery_id]
                     changed = False
-                    if consent and o.store_robot_consent != consent:
-                        o.store_robot_consent = consent
-                        changed = True
-                    # 상점ID 도 같이 채운다 — 동의율은 상점 단위 집계라 상점ID 가 없으면
-                    # 값이 있어도 '상점 수' 모수에서 빠진다(kpi.consent_stats).
-                    if store_id and o.store_id != store_id:
-                        o.store_id = store_id
-                        changed = True
+                    for attr, v in pairs[o.delivery_id].items():
+                        if getattr(o, attr) != v:
+                            setattr(o, attr, v)
+                            changed = True
                     if changed:
                         st["updated"] += 1
             if dry_run:

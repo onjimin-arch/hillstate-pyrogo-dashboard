@@ -12,6 +12,11 @@
     {%- else %}<span class="mut">-</span>{% endif -%}
     {%- if r.consent_from_roster %}<span class="mut">*</span>{% endif -%}
   </td>
+  <td>
+    {%- if r.payment and r.payment != '선결제' %}<span class="badge warn" title="현장결제는 로봇이 수납을 못 해 로봇으로 보낼 수 없습니다">{{ r.payment | replace('결제', '') }}</span>
+    {%- elif r.payment %}{{ r.payment }}
+    {%- else %}<span class="mut" title="결제방식 컬럼이 쿼리에 추가되기 전 수집분입니다">-</span>{% endif -%}
+  </td>
   <td>{{ '완료' if r.delivery_status == 'DROP_FINISHED' else (r.delivery_status or '-') }}</td>
   <td class="num tot">{{ r.total_min | num(1) }}</td>
   {% for k, lab, tip in segs %}

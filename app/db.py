@@ -13,6 +13,7 @@ STR_COLS = {
     "주문처": "order_source", "라이더ID": "rider_id", "주문상태": "order_status",
     "배달상태": "delivery_status",
     "상점ID": "store_id", "상점로봇동의상태": "store_robot_consent",   # 동의/미동의/미응답 (Redash 쿼리에서 산출)
+    "결제방식": "payment_method",   # 선결제/현장카드결제/현장현금결제 (Redash 가 결제금액으로 판정)
 }
 DT_COLS = {
     "상점주문접수일시": "ord_dt", "라이더배차일시": "dispatch_dt",
@@ -62,6 +63,7 @@ class RawOrder(Base):
     store_name: Mapped[str | None] = mapped_column(String)
     store_id: Mapped[str | None] = mapped_column(String)
     store_robot_consent: Mapped[str | None] = mapped_column(String)   # 동의/미동의/미응답 (NULL=컬럼 추가 전 수집분)
+    payment_method: Mapped[str | None] = mapped_column(String)        # 선결제/현장카드결제/현장현금결제 (NULL=컬럼 추가 전 수집분)
     order_source: Mapped[str | None] = mapped_column(String)
     rider_id: Mapped[str | None] = mapped_column(String)
     order_status: Mapped[str | None] = mapped_column(String)
@@ -170,7 +172,7 @@ def _migrate(engine) -> None:
         with engine.begin() as c:
             c.execute(text("ALTER TABLE robot_order_notes ADD COLUMN miss_reason VARCHAR"))
     raw_cols = {c["name"] for c in insp.get_columns("raw_orders")}
-    for name in ("store_id", "store_robot_consent"):
+    for name in ("store_id", "store_robot_consent", "payment_method"):
         if name not in raw_cols:
             with engine.begin() as c:
                 c.execute(text(f"ALTER TABLE raw_orders ADD COLUMN {name} VARCHAR"))

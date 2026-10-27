@@ -28,7 +28,7 @@ ROBOTS = ["가상로봇 1호기", "가상로봇 2호기", "가상로봇 3호기"
 
 
 def mk(i, ord_dt, robot, store_type, s1, s2, s3, s4, tail, *,
-       status="DROP_FINISHED", dispatch_count=1, consent="동의", drop=()):
+       status="DROP_FINISHED", dispatch_count=1, consent="동의", payment="선결제", drop=()):
     """구간 초를 받아 타임스탬프까지 역산해 넣는다. drop 에 적은 필드는 비운다(결측 재현)."""
     dispatch_dt = ord_dt + timedelta(seconds=s1)
     pickup_dt = dispatch_dt + timedelta(seconds=s2)
@@ -45,7 +45,8 @@ def mk(i, ord_dt, robot, store_type, s1, s2, s3, s4, tail, *,
         store_type=store_type, robot_matched="Y" if robot else "N",
         robot_name=random.choice(ROBOTS) if robot else None,
         store_name=random.choice(STORES), store_id=f"S{i % 4 + 1:03d}",
-        store_robot_consent=consent, order_source=random.choice(SOURCES),
+        store_robot_consent=consent, payment_method=payment,
+        order_source=random.choice(SOURCES),
         rider_id=f"RIDER{i % 7 + 1:03d}", order_status="DONE",
         delivery_status=status, dispatch_count=dispatch_count,
         ord_dt=ord_dt, dispatch_dt=dispatch_dt, pickup_dt=pickup_dt,
@@ -92,6 +93,8 @@ def build(base: date):
                           s3=None, s4=None,
                           tail=pick((400, 800), (1300, 2100), 0.10),  # 일반은 ⑤가 라이더 배송 구간
                           consent=random.choice(["동의", "미동의", "미응답"]),
+                          payment=random.choice(["선결제", "선결제", "선결제",
+                                                 "현장카드결제", "현장현금결제"]),
                           dispatch_count=random.choice([1, 1, 1, 2, 3])))
 
     # 화면에서 갈리는 특수 케이스들

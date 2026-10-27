@@ -162,6 +162,30 @@ def keep(rows: list[RawOrder], notes: dict) -> list[RawOrder]:
 
 LOADSHOP = "일반(로드샵)"
 CONSENT_OK, CONSENT_NO, CONSENT_NONE = "동의", "미동의", "미응답"
+PREPAID = "선결제"
+
+
+def is_onsite(payment: str | None) -> bool:
+    """현장결제(카드·현금) = 로봇이 수납을 못 해 애초에 로봇과 매칭될 수 없는 건.
+
+    값이 비었으면 False 로 본다 — 결제방식 컬럼이 쿼리에 추가되기 전 수집분이 NULL 이라,
+    모르는 건을 '못 간다' 로 빼면 과거 기간의 누락 후보가 통째로 줄고 이용률 분모도 줄어
+    이용률이 실제보다 높게 보인다. 백필(collector.backfill_added_columns)로 채워지면
+    저절로 판정된다. 쓰는 곳: is_robot_miss(후보 조건⑥), robot_eligible(이용률 분모).
+    """
+    return bool(payment) and payment != PREPAID
+
+
+def robot_eligible(rows: list[RawOrder]) -> list[RawOrder]:
+    """이용률 분모 = 로봇과 매칭될 수 있었던 주문. 현장결제는 빼고 센다.
+
+    로봇이 카드·현금을 못 받으니 현장결제 건은 애초에 로봇에 붙을 수 없다 — 분모에 두면
+    로봇이 가져갈 수 없는 물량까지 모수로 잡혀 이용률이 실제보다 낮게 나온다.
+    로봇연계 건은 결제방식과 무관하게 남긴다: 실제로 로봇이 간 건이라 분자에 있어야 하는데,
+    분모에서 빼면 분자가 분모보다 커진다.
+    건수·시간 지표의 모수는 건드리지 않는다 — 현장결제도 '일어난 배송' 이기 때문이다.
+    """
+    return [o for o in rows if o.delivery_type == ROBOT or not is_onsite(o.payment_method)]
 
 
 def consent_stats(rows: list[RawOrder], by_store: dict[str, str] | None = None) -> dict:
@@ -405,7 +429,9 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
     b2b_general = [o for o in general if o.store_type == "B2B"]
     loadshop_robot = [o for o in robots_all if o.store_type == "일반(로드샵)"]
     b2b_robot = [o for o in robots_all if o.store_type == "B2B"]
-    ls_base = len(loadshop_general) + len(loadshop_robot)
+    # 이용률 분모만 '로봇과 매칭될 수 있었던 주문' 으로 좁힌다(현장결제 제외).
+    usage_base = robot_eligible(rows)
+    ls_base = sum(1 for o in usage_base if o.store_type == LOADSHOP)
     robots = [o for o in robots_all if not _time_invalid(o, notes)]   # 시간·적시 지표 모수
     timed = general + robots
 
@@ -477,7 +503,11 @@ def compute_metrics(rows: list[RawOrder], notes: dict) -> dict:
         "loadshop_robot_done": len(loadshop_robot),
         "b2b_robot_done": len(b2b_robot),
         "usage_loadshop_pct": round(len(loadshop_robot) / ls_base * 100, 1) if ls_base else None,
-        "usage_pct": round(len(robots_all) / len(rows) * 100, 1) if rows else None,
+        "usage_pct": round(len(robots_all) / len(usage_base) * 100, 1) if usage_base else None,
+        # 이용률 분모와 거기서 빠진 현장결제 건수. 화면이 "무엇으로 나눈 값인지" 를 밝히는 데 쓴다.
+        "usage_base_n": len(usage_base),
+        "onsite_n": len(rows) - len(usage_base),
+        "usage_loadshop_base_n": ls_base,
         "avg_total_min": _min(avg_total),
         "median_total_min": _min(statistics.median(clean)) if clean else None,
         "avg_pickup_min": _min(avg_pick),
@@ -552,9 +582,10 @@ def weekly_series(rows, notes, de: date, weeks: int = 12, anchor: date | None = 
         out["labels"].append(f"{ws:%m/%d}~" + ("" if we <= de else "(진행중)"))
         out["robot_min"].append(_min(_mean([o.s_order_finish for o in rob])))
         out["general_min"].append(_min(_mean([o.s_order_finish for o in gen])))
-        out["usage_pct"].append(round(len(rob_all) / len(wr) * 100, 1) if wr else None)
-        out["usage_all_pct"].append(round(len(rob_all) / len(wr) * 100, 1) if wr else None)   # 전체_로봇 이용률
-        ls = [o for o in wr if o.store_type == LOADSHOP]
+        wu = robot_eligible(wr)                                         # 현장결제 뺀 이용률 분모
+        out["usage_pct"].append(round(len(rob_all) / len(wu) * 100, 1) if wu else None)
+        out["usage_all_pct"].append(round(len(rob_all) / len(wu) * 100, 1) if wu else None)   # 전체_로봇 이용률
+        ls = [o for o in wu if o.store_type == LOADSHOP]
         ls_rob = [o for o in ls if o.delivery_type == ROBOT]
         out["usage_loadshop_pct"].append(round(len(ls_rob) / len(ls) * 100, 1) if ls else None)  # 로드샵_로봇 이용률
         out["n"].append(len(wr))
@@ -1021,6 +1052,9 @@ def order_row_view(o: RawOrder, n: RobotOrderNote | None) -> dict:
         "delivery_type": o.delivery_type, "is_robot": o.delivery_type == ROBOT,
         "robot_name": o.robot_name, "order_source": o.order_source, "store_name": o.store_name,
         "store_type": o.store_type, "consent": o.store_robot_consent or "", "delivery_status": o.delivery_status,
+        # 결제방식: 컬럼 추가 전 수집분은 NULL 이다. 빈 값을 '선결제' 로 보면 안 된다 —
+        # 현장결제는 로봇이 수납을 못 해 로봇으로 못 가는 건이라 판정이 뒤집힌다.
+        "payment": o.payment_method or "",
         "total_min": _min(o.s_order_finish), "dispatch_count": o.dispatch_count,
         "hand_min": _min(o.s_dockclose_robotfinish),
         "late": (o.s_dockclose_robotfinish is not None and o.s_dockclose_robotfinish > CFG["timely_threshold_sec"]),
@@ -1069,14 +1103,15 @@ def in_robot_hours(dt: datetime | None) -> bool:
 def is_robot_miss(r: dict) -> bool:
     """로봇 누락 후보 = 로봇으로 갈 수 있었는데 로봇이 안 붙은 완료 건.
 
-    조건은 ① 로봇연계가 아님 ② 완료 ③ 로드샵 ④ 상점이 로봇배송 동의 ⑤ 접수가 로봇 운영시간 안.
-    ③④⑤가 없으면 애초에 로봇이 못 가는 건까지 '누락' 으로 세게 된다(B2B·미동의 상점·심야).
+    조건은 ① 로봇연계가 아님 ② 완료 ③ 로드샵 ④ 상점이 로봇배송 동의 ⑤ 접수가 로봇 운영시간 안
+    ⑥ 현장결제가 아님. ③~⑥ 이 없으면 애초에 로봇이 못 가는 건까지 '누락' 으로 세게 된다
+    (B2B·미동의 상점·심야·현장결제).
     동의 여부는 주문 행 값이 없으면 상점 명부로 메운 값을 쓴다 — 동의 컬럼이 쿼리에 추가되기
     전 수집분이 NULL 이라, 그대로 두면 과거 기간이 통째로 0 건으로 보인다.
     """
     return (not r["is_robot"] and r["delivery_status"] == DONE
             and r["store_type"] == LOADSHOP and r["consent"] == CONSENT_OK
-            and in_robot_hours(r["ord_dt"]))
+            and in_robot_hours(r["ord_dt"]) and not is_onsite(r["payment"]))
 
 
 def order_list(session, p: Period, flt: str | None = None, st: str | None = None,

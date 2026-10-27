@@ -46,9 +46,9 @@ def test_consent_backfill_endpoint(client, monkeypatch):
     def fake(start, end, dry_run=False, fetch=None):
         seen["range"] = (start, end)
         return {"months": 1, "fetched": 21, "matched": 20, "updated": 18, "not_in_db": 1,
-                "no_consent_col": [], "failed": []}
+                "no_col": {}, "failed": []}
 
-    monkeypatch.setattr(scheduler, "backfill_consent", fake)
+    monkeypatch.setattr(scheduler, "backfill_added_columns", fake)
     monkeypatch.setattr(scheduler, "orders_date_range", lambda s: (date(2026, 8, 1), date(2026, 10, 18)))
     h = {**jwt("jmlee@barogo.com"), "x-requested-with": "x"}
     other = {**jwt("other@barogo.com"), "x-requested-with": "x"}
@@ -62,7 +62,7 @@ def test_consent_backfill_endpoint(client, monkeypatch):
     assert seen["range"] == (date(2026, 8, 1), date(2026, 10, 18))
     msg = client.get("/admin/collect/status", headers=h).json()["last_consent"]
     assert "갱신 18건" in msg and "2026-08-01~2026-10-18" in msg
-    assert "동의상태만 채우기" in client.get("/admin/import", headers=h).text
+    assert "보강 컬럼 채우기" in client.get("/admin/import", headers=h).text
 
 
 def test_status_reports_response_columns(client, monkeypatch):
@@ -98,9 +98,9 @@ def test_consent_backfill_leaves_a_log_row(client, monkeypatch):
 
     from app import kpi, scheduler
     monkeypatch.setattr(scheduler, "orders_date_range", lambda s: (date(2026, 8, 1), date(2026, 10, 19)))
-    monkeypatch.setattr(scheduler, "backfill_consent", lambda *a, **k: {
+    monkeypatch.setattr(scheduler, "backfill_added_columns", lambda *a, **k: {
         "months": 3, "fetched": 900, "matched": 880, "updated": 870, "not_in_db": 2,
-        "no_consent_col": [], "failed": []})
+        "no_col": {}, "failed": []})
     h = {**jwt("jmlee@barogo.com"), "x-requested-with": "x"}
     assert client.post("/admin/collect/consent", headers=h).status_code == 202
     for _ in range(50):
@@ -109,7 +109,7 @@ def test_consent_backfill_leaves_a_log_row(client, monkeypatch):
         time.sleep(0.05)
 
     rows = client.get("/admin/collect/status", headers=h).json()["log"]
-    assert rows and rows[0]["status"] == "info" and "동의상태 백필" in rows[0]["message"]
+    assert rows and rows[0]["status"] == "info" and "보강 컬럼 백필" in rows[0]["message"]
     assert "갱신 870건" in rows[0]["message"]
     with dbm.get_session_factory()() as s:
         f = kpi.freshness(s)
