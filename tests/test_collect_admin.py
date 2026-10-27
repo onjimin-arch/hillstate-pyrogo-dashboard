@@ -16,7 +16,9 @@ def test_collect_status_and_access(client):
     j = client.get("/admin/collect/status", headers=h).json()
     assert j["raw_orders"] == 0 and set(j["env"]) == {"REDASH_URL", "REDASH_API_KEY", "REDASH_QUERY_ID"}
     assert j["log"] == []
-    assert "지금 수집" in client.get("/admin/import", headers=h).text
+    assert j["sheet_configured"] is False       # NEUBILITY_SHEET_URL 미설정
+    page = client.get("/admin/import", headers=h).text
+    assert "지금 수집" in page and "시트에서 가져오기" in page
 
 
 def test_manual_trigger_runs_once(client, monkeypatch):

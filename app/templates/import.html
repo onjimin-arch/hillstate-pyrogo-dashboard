@@ -25,7 +25,14 @@
 </div>
 
 <div class="card" style="margin-bottom:12px">
-  <div class="k"><b>뉴빌리티 로봇 기록 올리기</b></div>
+  <div class="k"><b>뉴빌리티 로봇 기록</b>
+    <button type="button" id="t-go" class="imp-btn" title="설정된 공개 시트 주소에서 바로 긁어옵니다. 파일을 내려받아 올릴 필요가 없습니다.">시트에서 가져오기</button></div>
+  <div class="sub" id="t-info" aria-live="polite"></div>
+  <div class="sub" style="margin-bottom:8px">
+    <b>시트에서 가져오기</b>는 설정된 시트 주소를 직접 읽습니다(자동 수집 주기마다 같은 작업이 돕니다).
+    시트 공유가 <b>링크가 있는 모든 사용자(뷰어)</b> 여야 하며, 비공개로 바뀌면 실패로 표시됩니다.
+    아래 파일 업로드는 그대로 쓸 수 있습니다 — 주소가 막혔거나 다른 시트를 올릴 때 씁니다.
+  </div>
   <div class="sub" style="margin-bottom:8px">
     뉴빌리티가 기입하는 시트를 <b>CSV 또는 엑셀</b>로 내려받아 올리면 대시보드의 <b>로봇 복귀·가용률</b>과
     로봇 배송 건 리스트의 <b>동</b>에 반영됩니다(구글 스프레드시트는 파일 → 다운로드 → CSV/XLSX).
@@ -120,6 +127,11 @@
       (miss.length ? ' · 미설정 환경변수: ' + miss.join(', ') : '');
     var e = $('c-err'); e.hidden = !j.last_error; e.textContent = j.last_error || '';
     $('c-consent-info').textContent = j.last_consent ? '동의상태 백필: ' + j.last_consent : '';
+    var t = $('t-info'), tb = $('t-go');
+    tb.disabled = !j.sheet_configured;
+    t.className = 'sub' + (j.last_trips && j.last_trips.indexOf('실패') >= 0 ? ' bad' : '');
+    t.textContent = !j.sheet_configured ? '시트 주소 미설정 (NEUBILITY_SHEET_URL) — 파일 업로드만 가능합니다'
+      : (j.last_trips ? '시트 가져오기: ' + j.last_trips : '시트 가져오기: 아직 실행된 적 없음');
     var c = j.cols || {}, cols = $('c-cols');
     cols.className = 'sub' + (c.missing && c.missing.length ? ' bad' : '');
     cols.textContent = !c.n ? '' :
@@ -145,6 +157,11 @@
   $('c-go').addEventListener('click', function () {
     fetch('/admin/collect', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
       if (!r.ok) return r.json().then(function (d) { setMsg('수집 시작 실패: ' + (d.detail || r.status)); });
+    }).then(cPoll);
+  });
+  $('t-go').addEventListener('click', function () {
+    fetch('/admin/trips/fetch', {method: 'POST', headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
+      if (!r.ok) return r.json().then(function (d) { setMsg('시트 가져오기 실패: ' + (d.detail || r.status)); });
     }).then(cPoll);
   });
   $('c-consent').addEventListener('click', function () {

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 
+from . import neubility
 from .collector import CollectError, backfill_consent, orders_date_range, run_collect
 from .collector import log as write_collect_log
 from .db import CollectLog, get_session_factory
@@ -19,9 +20,10 @@ from .db import CollectLog, get_session_factory
 log = logging.getLogger("dashboard.scheduler")
 _stop = threading.Event()
 _run_lock = threading.Lock()          # 수집은 한 번에 하나만(주기 스레드·수동 실행 공용)
+_trips_lock = threading.Lock()        # 시트 가져오기는 robot_trips 만 건드려 Redash 수집과 별도로 돈다
 REDASH_ENV = ("REDASH_URL", "REDASH_API_KEY", "REDASH_QUERY_ID")
 STATE = {"enabled": None, "interval_min": None, "running": False, "last_start": None,
-         "last_error": None, "last_consent": None}
+         "last_error": None, "last_consent": None, "last_trips": None}
 
 
 def _configured() -> bool:
@@ -98,6 +100,42 @@ def consent_backfill_once() -> bool:
     return True
 
 
+def trips_once() -> bool:
+    """공개 시트를 긁어 robot_trips 에 upsert. 이미 돌고 있으면 False.
+
+    robot_trips 만 건드리므로 Redash 수집과 락을 나눠 쓴다(백필이 길어도 막히지 않는다).
+    시트가 비공개로 바뀌거나 양식이 틀어지면 여기서 끝나고 기존 데이터는 그대로 남는다.
+    collect_log 는 Redash 수집 전용이라 건드리지 않는다 — 남기면 '마지막 수집 시각'이 잘못 갱신된다.
+    """
+    if not _trips_lock.acquire(blocking=False):
+        return False
+    try:
+        blob = neubility.fetch()
+        with get_session_factory()() as s:
+            trips, stat = neubility.parse(blob)
+            n = neubility.upsert(s, trips, "auto-sheet")
+        STATE["last_trips"] = (f"{datetime.now():%m-%d %H:%M} · {n:,}건 적재"
+                               f" ({stat['date_from']}~{stat['date_to']})")
+        log.info("시트 가져오기 완료 %s건", n)
+    except neubility.SheetError as e:
+        STATE["last_trips"] = f"{datetime.now():%m-%d %H:%M} · 실패: {str(e)[:200]}"
+        log.error("시트 가져오기 실패: %s", e)
+    except Exception as e:              # noqa: BLE001 — 스레드는 죽지 않게 한다
+        STATE["last_trips"] = f"{datetime.now():%m-%d %H:%M} · 오류: {type(e).__name__}"
+        log.exception("시트 가져오기 오류")
+    finally:
+        _trips_lock.release()
+    return True
+
+
+def trigger_trips() -> bool:
+    """시트 가져오기를 백그라운드로 시작. 이미 진행 중이면 False."""
+    if _trips_lock.locked():
+        return False
+    threading.Thread(target=trips_once, name="sheet-fetch", daemon=True).start()
+    return True
+
+
 def trigger_consent() -> bool:
     """동의상태 백필을 백그라운드로 시작. 수집이 진행 중이면 False."""
     if _run_lock.locked():
@@ -119,12 +157,16 @@ def status() -> dict:
     # 쿼리를 실행하는지 모르면 "컬럼이 안 온다" 를 화면에서 판단할 수 없다.
     return {**STATE, "configured": _configured(), "query_id": os.getenv("REDASH_QUERY_ID", "").strip() or None,
             "consent_query_id": os.getenv("REDASH_CONSENT_QUERY_ID", "").strip() or None,
+            "sheet_configured": bool(neubility.sheet_url()),
             "env": {k: bool(os.getenv(k, "").strip()) for k in REDASH_ENV}}
 
 
 def _loop(interval_sec: int) -> None:
     while not _stop.is_set():
-        collect_once()
+        if _configured():
+            collect_once()
+        if neubility.sheet_url():
+            trips_once()
         _stop.wait(interval_sec)
 
 
@@ -133,8 +175,8 @@ def start() -> None:
     if os.getenv("AUTO_COLLECT", "1").strip() == "0":
         log.info("AUTO_COLLECT=0 — 자동 수집 꺼짐")
         return
-    if not _configured():
-        log.warning("REDASH_URL/REDASH_API_KEY/REDASH_QUERY_ID 미설정 — 자동 수집 안 함")
+    if not _configured() and not neubility.sheet_url():
+        log.warning("REDASH_URL/REDASH_API_KEY/REDASH_QUERY_ID · NEUBILITY_SHEET_URL 미설정 — 자동 수집 안 함")
         return
     minutes = max(5, int(os.getenv("COLLECT_INTERVAL_MIN", "60") or 60))
     _stop.clear()

@@ -353,6 +353,19 @@ def collect_consent(request: Request, user=Depends(require_import_admin)):
     return {"status": "running"}
 
 
+@app.post("/admin/trips/fetch", status_code=202)
+def fetch_trips(request: Request, user=Depends(require_import_admin)):
+    """공개 구글 시트에서 뉴빌리티 기록을 직접 긁어온다(파일 업로드 대체)."""
+    if "x-requested-with" not in request.headers:     # 커스텀 헤더 필수(CSRF 방지)
+        raise HTTPException(400, "잘못된 요청")
+    if not neubility.sheet_url():
+        raise HTTPException(400, f"{neubility.SHEET_URL_ENV} 환경변수가 설정되지 않았습니다")
+    if not scheduler.trigger_trips():
+        raise HTTPException(409, "이미 시트를 가져오는 중입니다")
+    log.info("manual sheet fetch by=%s", user)
+    return {"status": "running"}
+
+
 @app.post("/admin/import/upload", status_code=202)
 async def import_upload(request: Request, user=Depends(require_import_admin)):
     """본문(raw)을 청크 단위로 디스크에 스트리밍한 뒤 백그라운드 가져오기를 시작하고 바로 돌려준다."""
