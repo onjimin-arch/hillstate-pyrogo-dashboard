@@ -302,3 +302,11 @@ def test_fetch_route_access(client, monkeypatch):
     assert client.post("/admin/trips/fetch", headers=xhr).status_code == 202
     monkeypatch.delenv(nb.SHEET_URL_ENV, raising=False)
     assert client.post("/admin/trips/fetch", headers=xhr).status_code == 400   # 주소 미설정
+
+
+def test_day_accepts_excel_datetime_cell():
+    """엑셀 날짜 셀은 `2026-11-08 00:00:00` 으로 읽힌다 — 문자열 `26.11.08` 과 같은 날로 봐야 한다."""
+    from datetime import date
+    assert nb._day("2026-11-08 00:00:00") == date(2026, 11, 8)
+    assert nb._day("26.11.08") == date(2026, 11, 8)
+    assert nb._day("완료") is None
